@@ -2475,7 +2475,7 @@ let _lastDashFilter = ''; // track filter hiện tại để reset _gasLast* khi
 let _gasLastLive  = -1;
 let _gasLastTotal = -1;
 let _dK=new Set(), _lK=new Set();                  // done keys, live keys
-let _dkBangCode=new Set();                         // Set "bang|code" đã có kết quả
+let _dkBangCode=new Map();                         // Map "bang|code" → Set(giải) đã có kết quả (v7 FIX: was Set)
 let _dkScores={};                                  // { "bang|code": {scoreA,scoreB,...} }
 let _curGiaiId='', _curNd='', _curPage='dashboard'; // navigation state
 let _bkGiai='', _bkNd='', _bkGiaiName='';          // bracket state
@@ -5082,7 +5082,8 @@ function _bkStartSyncPoll() {
         const before = JSON.stringify(_bkOverrides);
         await _bkLoadOverridesFromGAS();
         if (JSON.stringify(_bkOverrides) !== before) {
-          renderBracketPage && renderBracketPage();
+          // v7 FIX: renderBracketPage không tồn tại → dùng _swapBkWrap + bkRender
+          await _swapBkWrap('nd-bk-wrap', () => Promise.resolve(bkRender()));
         }
       }
     } catch(e) { console.warn('[BK SYNC] Poll error:', e); }
@@ -6352,9 +6353,10 @@ async function _ndBkRender() {
   _bkOverrides = _bkLoadOverrides();
   _bkSaveState();
   // Load lại từ GAS sau 300ms (source of truth) để sync với admin khác
+  // v7 FIX: renderBracketPage không tồn tại → dùng _swapBkWrap + bkRender trực tiếp
   setTimeout(async () => {
     await _bkLoadOverridesFromGAS();
-    renderBracketPage();
+    await _swapBkWrap('nd-bk-wrap', () => Promise.resolve(bkRender()));
   }, 300);
 
   // Helper: vẽ cây vào ndWrap ngay lập tức
