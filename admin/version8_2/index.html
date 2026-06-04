@@ -5089,31 +5089,29 @@ async function ndRefresh() {
 function _bkStartSyncPoll() {
   if (_bkGasPollTimer) clearInterval(_bkGasPollTimer);
   _bkGasPollTimer = setInterval(async () => {
-    if (!_bkGiai || !_bkNd || !GS || !CODE) return;
-    // v8: Dừng sync poll khi cây đã xóa — tránh re-render cây trống
+    if (!_bkGiai || !_bkNd || !GS) return;
     if (_bkIsEmpty) return;
-    // v7: Block poll trong 5s sau khi xóa cây
     if (_bkDeletedAt && Date.now() - _bkDeletedAt < 5000) return;
     try {
+      // v37: Poll nhẹ bằng GET bracketVersion — không cần adminCode
       const giaiName = _resolveGiaiName(_bkGiai) || _bkGiai;
-      const vRes = await gPost({ action:'getBracketVersion', adminCode:CODE, giai:giaiName, nd:_bkNd });
+      const url = new URL(GS);
+      url.searchParams.set('action', 'bracketVersion');
+      url.searchParams.set('giai', giaiName);
+      url.searchParams.set('nd', _bkNd);
+      url.searchParams.set('_t', Date.now());
+      const r = await fetch(url.toString(), { cache: 'no-store' });
+      const vRes = await r.json();
       if (!vRes.ok) return;
       const remoteVer = vRes.version || 0;
-      if (remoteVer <= _bkLastVersion) return; // Không có gì mới
-      console.log('[BK SYNC] Remote change detected (v', remoteVer, '>', _bkLastVersion, ')');
-      // v37: Ưu tiên load snapshot (source of truth) nếu có
-      if (vRes.hasSnapshot && remoteVer > _bkLastSnapshotVersion) {
-        const loaded = await _bkLoadSnapshot();
-        if (loaded) {
-          await _swapBkWrap('nd-bk-wrap', () => Promise.resolve(bkRender()));
-          return;
-        }
-      }
-      // Fallback: chỉ load overrides (cây rebuild từ seeding local)
-      const before = JSON.stringify(_bkOverrides);
-      await _bkLoadOverridesFromGAS();
-      if (JSON.stringify(_bkOverrides) !== before) {
+      if (remoteVer <= _bkLastVersion) return;
+      console.log('[BK SYNC] GSheet BracketTree mới (v', remoteVer, '>', _bkLastVersion, ') — đang tải...');
+      // Có phiên bản mới → load cây từ GSheet
+      const loaded = await _bkLoadTreeFromSheet();
+      if (loaded) {
+        _bkCurrentTree = null; // force bkRender dùng tree mới từ GSheet
         await _swapBkWrap('nd-bk-wrap', () => Promise.resolve(bkRender()));
+        toast('🔄 Cây thi đấu đã được cập nhật từ GSheet', 'in', 2500);
       }
     } catch(e) { console.warn('[BK SYNC] Poll error:', e); }
   }, 5000);
@@ -6386,14 +6384,11 @@ async function _ndBkRender() {
 
   _bkOverrides = _bkLoadOverrides();
   _bkSaveState();
-  // Load lại từ GAS sau 300ms (source of truth) để sync với admin khác
-  // v37: Ưu tiên load snapshot (toàn bộ cây) thay vì chỉ overrides
+  // v37: Load cây từ GSheet BracketTree — single source of truth
+  // Render local trước (nhanh), sau đó sync từ GSheet
   setTimeout(async () => {
-    const snapLoaded = await _bkLoadSnapshot();
-    if (snapLoaded) {
-      await _swapBkWrap('nd-bk-wrap', () => Promise.resolve(bkRender()));
-    } else {
-      await _bkLoadOverridesFromGAS();
+    const loaded = await _bkLoadTreeFromSheet();
+    if (loaded || _bkCurrentTree) {
       await _swapBkWrap('nd-bk-wrap', () => Promise.resolve(bkRender()));
     }
   }, 300);
@@ -9434,10 +9429,10 @@ function _bkKey() {
 }
 // ── Bracket Overrides: đồng bộ qua GAS (PropertiesService) ──────────────────
 // localStorage chỉ dùng làm cache tạm để UI nhanh, GAS là source of truth
-let _bkOvSaveTimer  = null; // debounce save
-let _bkGasPollTimer = null; // auto-poll GAS bracket overrides (sync giữa các admin)
-let _bkLastVersion  = 0;    // v7: timestamp version từ GAS — chỉ fetch full khi có thay đổi
-let _bkLastSnapshotVersion = 0; // v37: version của snapshot đã load — tránh re-render không cần
+let _bkOvSaveTimer   = null;
+let _bkGasPollTimer  = null;
+let _bkLastVersion   = 0;    // version từ GAS BracketTree — chỉ fetch khi thay đổi
+let _bkTreeSaveTimer = null; // debounce save tree lên GSheet
 let _bkDeletedAt    = 0;    // v7: timestamp khi vừa xóa cây — block mọi auto-render trong 5s
 let _bkIsEmpty      = false; // v7: true = cây đã bị xóa, bkRender hiện trống thay vì rebuild từ seeding
 
@@ -9469,52 +9464,64 @@ function _bkLoadOverrides() {
   try { return JSON.parse(localStorage.getItem(_bkKey())||'{}'); } catch(e){ return {}; }
 }
 
-async function _bkLoadOverridesFromGAS() {
-  if (!_bkGiai || !_bkNd || !GS || !CODE) return;
-  try {
-    const giaiName = _resolveGiaiName(_bkGiai) || _bkGiai;
-    const d = await gPost({ action:'getBracketOverrides', adminCode:CODE, giai:giaiName, nd:_bkNd });
-    if (d.ok && d.overrides) {
-      _bkOverrides = d.overrides;
-      try { localStorage.setItem(_bkKey(), JSON.stringify(_bkOverrides)); } catch(e){}
-      if (d.version) _bkLastVersion = d.version;
-    }
-  } catch(e) { console.warn('[BK SYNC] Load overrides failed:', e); }
-}
+// ── GSheet BracketTree sync — v37: single source of truth ──
 
-// v37: Lưu toàn bộ snapshot cây lên GAS — single source of truth
-async function _bkSaveSnapshot() {
-  if (!_bkGiai || !_bkNd || !_bkCurrentTree || !GS || !CODE) return;
+// Load cây từ GSheet BracketTree (GET, không cần auth POST)
+async function _bkLoadTreeFromSheet() {
+  if (!_bkGiai || !_bkNd || !GS) return false;
   try {
     const giaiName = _resolveGiaiName(_bkGiai) || _bkGiai;
-    const snapshot = { tree: _bkCurrentTree, overrides: _bkOverrides, byeRule: _bkByeRule, savedAt: Date.now() };
-    const d = await gPost({ action:'saveBracketSnapshot', adminCode:CODE, giai:giaiName, nd:_bkNd, snapshot });
-    if (d.ok) {
-      _bkLastSnapshotVersion = d.version || Date.now();
-      _bkLastVersion = _bkLastSnapshotVersion;
-      console.log('[BK SNAP] Saved snapshot v', _bkLastSnapshotVersion);
-    }
-  } catch(e) { console.warn('[BK SNAP] Save error:', e); }
-}
-
-// v37: Load snapshot — dùng cho admin PC2 và player
-async function _bkLoadSnapshot() {
-  if (!_bkGiai || !_bkNd || !GS || !CODE) return false;
-  try {
-    const giaiName = _resolveGiaiName(_bkGiai) || _bkGiai;
-    const d = await gPost({ action:'getBracketSnapshot', adminCode:CODE, giai:giaiName, nd:_bkNd });
-    if (d.ok && d.snapshot) {
-      const snap = d.snapshot;
-      if (snap.tree)      _bkCurrentTree = snap.tree;
-      if (snap.overrides) { _bkOverrides = snap.overrides; try { localStorage.setItem(_bkKey(), JSON.stringify(_bkOverrides)); } catch(ex){} }
-      if (snap.byeRule)   _bkByeRule = snap.byeRule;
-      _bkLastSnapshotVersion = d.version || 0;
-      _bkLastVersion = _bkLastSnapshotVersion;
-      console.log('[BK SNAP] Loaded snapshot v', _bkLastSnapshotVersion);
+    const url = new URL(GS);
+    url.searchParams.set('action', 'bracketTree');
+    url.searchParams.set('giai', giaiName);
+    url.searchParams.set('nd', _bkNd);
+    url.searchParams.set('_t', Date.now());
+    const r = await fetch(url.toString(), { cache: 'no-store' });
+    const d = await r.json();
+    if (d.ok && d.tree && d.version) {
+      if (d.version <= _bkLastVersion) return false; // không có gì mới
+      _bkCurrentTree = d.tree;
+      // Restore overrides từ tree (chúng được embed trong tree khi save)
+      if (d.tree._overrides) {
+        _bkOverrides = d.tree._overrides;
+        try { localStorage.setItem(_bkKey(), JSON.stringify(_bkOverrides)); } catch(ex){}
+      }
+      if (d.tree._byeRule) _bkByeRule = d.tree._byeRule;
+      _bkLastVersion = d.version;
+      console.log('[BK TREE] Loaded from GSheet v', d.version, '— rounds:', _bkCurrentTree?.rounds?.length);
       return true;
     }
     return false;
-  } catch(e) { console.warn('[BK SNAP] Load error:', e); return false; }
+  } catch(e) { console.warn('[BK TREE] Load error:', e); return false; }
+}
+
+// Lưu cây lên GSheet BracketTree (POST)
+async function _bkSaveTreeToSheet() {
+  if (!_bkGiai || !_bkNd || !_bkCurrentTree || !GS || !CODE) return;
+  try {
+    const giaiName = _resolveGiaiName(_bkGiai) || _bkGiai;
+    // Embed overrides + byeRule vào tree để client không cần gọi riêng
+    const treeToSave = {
+      ..._bkCurrentTree,
+      _overrides: _bkOverrides,
+      _byeRule:   _bkByeRule,
+      _savedAt:   Date.now(),
+    };
+    const d = await gPost({ action:'saveBracketTree', adminCode:CODE, giai:giaiName, nd:_bkNd, tree:treeToSave });
+    if (d.ok) {
+      _bkLastVersion = d.version || Date.now();
+      console.log('[BK TREE] Saved to GSheet v', _bkLastVersion);
+      toast('☁️ Cây thi đấu đã đồng bộ lên GSheet', 'ok', 2000);
+    } else {
+      console.warn('[BK TREE] Save failed:', d.reason);
+    }
+  } catch(e) { console.warn('[BK TREE] Save error:', e); }
+}
+
+// Debounce lưu overrides + push tree lên GSheet
+async function _bkLoadOverridesFromGAS() {
+  // Giờ load từ GSheet tree (đã embed overrides)
+  await _bkLoadTreeFromSheet();
 }
 
 function _bkSaveOverrides() {
@@ -10102,9 +10109,9 @@ async function ndBkApplyFull() {
       _bkAutoMode = true;
       _bkStartAutoPolling();
       _bkStartSyncPoll();
-      // v37: Lưu snapshot sau khi áp dụng — tất cả PC và player sẽ đồng bộ từ đây
-      await _bkSaveSnapshot();
-      toast('🤖 Đã tạo lịch · Chế độ tự động điền đã BẬT', 'ok', 3000);
+      // v37: Lưu toàn bộ cây lên GSheet — tất cả PC và player sẽ tự tải về
+      await _bkSaveTreeToSheet();
+      toast('🤖 Đã tạo lịch · Cây đã đồng bộ GSheet · Tự động điền BẬT', 'ok', 3000);
     }
     _ndBkUpdateToolbarUI();
     // Render bảng đấu ngay nếu đang ở tab bảng đấu
@@ -10794,6 +10801,9 @@ function bkSaveEditNew(code) {
   bkRender();
   toast(`✅ Đã lưu trận ${code}`, 'ok');
   _bkSyncOverrideToSchedule(code).catch(()=>{});
+  // v37: Debounce lưu cây lên GSheet sau khi chỉnh sửa thủ công
+  if (_bkTreeSaveTimer) clearTimeout(_bkTreeSaveTimer);
+  _bkTreeSaveTimer = setTimeout(() => _bkSaveTreeToSheet(), 1200);
 }
 
 // Tra cứu seed realtime khi user gõ
@@ -11909,10 +11919,10 @@ async function bkApplyAndSave() {
 
     dedupM();
     toast(`✅ Đã tạo ${toCreate.length} trận · Cập nhật ${toUpdate.length} trận · Bỏ qua ${skipped}`, 'ok');
-    // Push overrides + snapshot lên GAS để đồng bộ với admin khác và player
     await _bkPushOverridesToGAS();
-    bkRender(); // rebuild _bkCurrentTree
-    await _bkSaveSnapshot(); // v37: lưu snapshot = source of truth cho mọi client
+    bkRender(); // rebuild _bkCurrentTree với teams mới
+    // v37: Lưu cây lên GSheet BracketTree — đây là nguồn đồng bộ duy nhất
+    await _bkSaveTreeToSheet();
   } catch(e) {
     toast('❌ Lỗi: '+e.message,'er');
   } finally {
