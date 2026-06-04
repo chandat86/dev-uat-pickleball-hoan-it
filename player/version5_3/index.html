@@ -1047,17 +1047,18 @@ function renderSchedule(){
       const tA=String(m[4]||'').trim()||'TBD',tB=String(m[7]||'').trim()||'TBD';
       const court=String(m[8]||''),round=String(m[9]||'');
       const matchTimeRaw=String(m[11]||'').trim(); // giờ thi đấu col[11]
-      // Format: HH:MM hoặc ISO datetime từ GAS (UTC, lệch -7h so VN) → "8:15"
+      // Format: GAS trả về HH:MM string đúng (đã fix ở GAS v40)
+      // Fallback: nếu vẫn còn ISO (data cũ) → parse UTC rồi cộng +7h (UTC+7)
       const fmtMatchTime=(v)=>{
         if(!v)return'';
-        // ISO: "1899-12-30T01:08:30.000Z" → cộng 7h để về giờ VN (UTC+7)
+        // ISO còn sót: "1899-12-30T01:08:30.000Z" → +7h về VN
         const iso=v.match(/T(\d{2}):(\d{2})/);
         if(iso){
-          const totalMin=parseInt(iso[1],10)*60+parseInt(iso[2],10)+7*60; // +7h
-          const h=Math.floor(totalMin/60)%24, mi=totalMin%60;
+          const totalMin=parseInt(iso[1],10)*60+parseInt(iso[2],10)+420;
+          const h=Math.floor(totalMin/60)%24,mi=totalMin%60;
           return h+':'+String(mi).padStart(2,'0');
         }
-        // HH:MM bình thường → bỏ số 0 đầu giờ: "08:15" → "8:15"
+        // HH:MM bình thường → bỏ số 0 đầu: "08:15" → "8:15"
         const hm=v.match(/^(\d{1,2}):(\d{2})/);
         if(hm)return parseInt(hm[1],10)+':'+hm[2];
         return v;
