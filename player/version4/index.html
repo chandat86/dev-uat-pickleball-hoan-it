@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>Pickleball v3.31— Xem Giải Đấu</title>
+<title>Pickleball v3.32— Xem Giải Đấu</title>
 <style>
 /* system font - no import needed */
 :root{
@@ -648,6 +648,8 @@ async function silentRefresh(){
       renderSchedule(); // smart patch — không nháy
     } else if(_curTab==='standings'){
       renderStandings(); // smart patch — không nháy
+    } else if(_curTab==='live'){
+      renderLive(); // smart patch — không nháy
     } else {
       renderCurrentTab();
     }
@@ -855,76 +857,78 @@ function getLiveByKey(nd,bang,code){
 // HDR_LIVE: [0]Key,[1]Giải đấu,[2]Đội A,[3]Điểm A,[4]Điểm B,[5]Đội B,[6]Giao bóng,[7]Game,[8]Cập nhật,[9]Trạng thái
 function renderLive(){
   const wrap=$('live-content');
-  if(!_L.length){
-    wrap.innerHTML=`<div class="empty-state">
-      <div class="empty-icon">🏓</div>
-      <div class="empty-msg">Hiện không có trận nào đang thi đấu</div>
-      <div class="empty-sub">Tự động cập nhật mỗi ${REFRESH_SEC}s</div>
-    </div>`;
-    return;
-  }
-  // Filter live by giai/nd
   const gUp=(_giaiName||USER_GIAI||'').toUpperCase();
   const liveRows=_L.filter(l=>{
     const lg=String(l[1]||'').trim().toUpperCase();
     if(gUp&&lg&&lg!==gUp)return false;
-    if(_curNd){
-      const key=String(l[0]||'');
-      const ndFromKey=key.split('|')[0]||'';
-      if(ndFromKey&&ndFromKey!==_curNd)return false;
-    }
+    if(_curNd){const nd=String(l[0]||'').split('|')[0]||'';if(nd&&nd!==_curNd)return false;}
     return true;
   });
-  if(!liveRows.length){
-    wrap.innerHTML=`<div class="empty-state"><div class="empty-icon">🏓</div>
-      <div class="empty-msg">Hiện không có trận nào đang thi đấu</div>
-      <div class="empty-sub">Tự động cập nhật mỗi ${REFRESH_SEC}s</div></div>`;
-    return;
-  }
-  wrap.innerHTML=`<div class="live-grid" style="margin-top:4px">${liveRows.map(l=>{
+
+  const _buildCard=(l)=>{
     const key=String(l[0]||'');
     const parts=key.split('|');
     const nd=parts[0]||'',bang=parts[1]||'',code=parts[2]||'';
     const tA=String(l[2]||'—'),tB=String(l[5]||'—');
     const sA=Number(l[3]||0),sB=Number(l[4]||0);
-    const serve=String(l[6]||'');
-    const game=String(l[7]||'');
+    const serve=String(l[6]||''),game=String(l[7]||'');
     const aWin=sA>sB,bWin=sB>sA;
-    // Find match for court/round info
     const mInfo=_M.find(m=>String(m[3]||'')===code&&String(m[2]||'')===bang)||null;
     const court=mInfo?String(mInfo[8]||''):'';
     const round=mInfo?String(mInfo[9]||''):'';
-    return `<div class="live-card">
-      <div class="lc-hdr">
+    return {key, html:`<div class="lc-hdr">
         <div class="lc-live-badge"><div class="dot"></div>LIVE</div>
         <div class="lc-meta">${esc(bang||nd)}${round?' · '+esc(round):''}</div>
       </div>
-      <div class="lc-body">
-        <div class="lc-scoreboard">
-          <div class="lc-team">
-            <div class="lc-team-name">${esc(tA)}</div>
-            <div class="lc-serve">${serve==='A'?'🟡 Giao bóng':''}</div>
-          </div>
-          <div class="lc-score-wrap">
-            <div>
-              <span class="lc-num${aWin?' win':''}">${sA}</span>
-              <span class="lc-dash">–</span>
-              <span class="lc-num${bWin?' win':''}">${sB}</span>
-            </div>
-            ${game?`<div class="lc-game">Game ${esc(game)}</div>`:''}
-          </div>
-          <div class="lc-team">
-            <div class="lc-team-name">${esc(tB)}</div>
-            <div class="lc-serve">${serve==='B'?'🟡 Giao bóng':''}</div>
-          </div>
-        </div>
-      </div>
-      <div class="lc-ftr">
-        <div class="lc-court">${court?'🏸 '+esc(court):''}</div>
-        <div class="lc-round-tag">${esc(round)}</div>
-      </div>
-    </div>`;
-  }).join('')}</div>`;
+      <div class="lc-body"><div class="lc-scoreboard">
+        <div class="lc-team"><div class="lc-team-name">${esc(tA)}</div>
+          <div class="lc-serve">${serve==='A'?'🟡 Giao bóng':''}</div></div>
+        <div class="lc-score-wrap"><div>
+          <span class="lc-num${aWin?' win':''}">${sA}</span>
+          <span class="lc-dash">–</span>
+          <span class="lc-num${bWin?' win':''}">${sB}</span>
+        </div>${game?`<div class="lc-game">Game ${esc(game)}</div>`:''}</div>
+        <div class="lc-team"><div class="lc-team-name">${esc(tB)}</div>
+          <div class="lc-serve">${serve==='B'?'🟡 Giao bóng':''}</div></div>
+      </div></div>
+      <div class="lc-ftr"><div class="lc-court">${court?'🏸 '+esc(court):''}</div>
+        <div class="lc-round-tag">${esc(round)}</div></div>`};
+  };
+
+  // FIX v3.31: Smart patch — không replace toàn bộ innerHTML (tránh nháy)
+  if(!liveRows.length){
+    // Không có trận live → hiện empty state (chỉ update nếu chưa hiện)
+    const empMsg='Hiện không có trận nào đang thi đấu';
+    const existing=wrap.querySelector('.empty-msg');
+    if(existing&&existing.textContent===empMsg)return; // đã đúng rồi
+    wrap.innerHTML=`<div class="empty-state"><div class="empty-icon">🏓</div>
+      <div class="empty-msg">${empMsg}</div>
+      <div class="empty-sub">Tự động cập nhật mỗi ${REFRESH_SEC}s</div></div>`;
+    return;
+  }
+
+  // Lấy danh sách live-card hiện có trong DOM
+  const existingCards=wrap.querySelectorAll('.live-card');
+  const existingByKey=new Map();
+  existingCards.forEach(card=>{ const k=card.dataset.key; if(k)existingByKey.set(k,card); });
+
+  // Số trận thay đổi → full render một lần
+  if(existingCards.length!==liveRows.length){
+    wrap.innerHTML=`<div class="live-grid" style="margin-top:4px">${liveRows.map(l=>{
+      const {key,html}=_buildCard(l);
+      return `<div class="live-card" data-key="${esc(key)}">${html}</div>`;
+    }).join('')}</div>`;
+    return;
+  }
+
+  // Patch in-place từng card — chỉ update nội dung nếu thay đổi
+  liveRows.forEach(l=>{
+    const {key,html}=_buildCard(l);
+    const card=existingByKey.get(key);
+    if(card){
+      if(card.innerHTML!==html)card.innerHTML=html;
+    }
+  });
 }
 
 // ══ RENDER SCHEDULE (Lịch đấu = tất cả bảng + trận) ══
