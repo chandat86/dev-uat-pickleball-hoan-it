@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>Pickleball v3.30— Xem Giải Đấu</title>
+<title>Pickleball v3.31— Xem Giải Đấu</title>
 <style>
 /* system font - no import needed */
 :root{
@@ -645,8 +645,9 @@ async function silentRefresh(){
         renderBracketTab();
       }
     } else if(_curTab==='schedule'){
-      // Schedule: re-render nhưng giữ collapse state (đã xử lý trong renderSchedule)
-      renderSchedule();
+      renderSchedule(); // smart patch — không nháy
+    } else if(_curTab==='standings'){
+      renderStandings(); // smart patch — không nháy
     } else {
       renderCurrentTab();
     }
@@ -1076,10 +1077,10 @@ function renderStandings(){
   const sortedBangs=[...byBang.keys()].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'}));
   const adv=sortedBangs.length>=2?2:1;
 
-  wrap.innerHTML=sortedBangs.map(bang=>{
+  // FIX v3.30: Smart patch BXH — không replace toàn bộ innerHTML (tránh nháy)
+  const _buildBxhCard=(bang)=>{
     const rows=byBang.get(bang);
     const ts={};
-    // KetQua: [0]time,[1]giai,[2]nd,[3]bang,[4]code,[5]teamA,[6]teamB,[7]sA,[8]sB
     rows.forEach(r=>{
       const tA=String(r[5]||''),tB=String(r[6]||'');
       const sA=Number(r[7]||0),sB=Number(r[8]||0);
@@ -1098,29 +1099,57 @@ function renderStandings(){
       return b.pf-a.pf;
     });
     const rk=i=>i===0?'r1':i===1?'r2':i===2?'r3':'rn';
-    return `<div class="bxh-card">
-      <div class="bxh-head" onclick="toggleBxh(this)">
-        <div class="bxh-bang">${esc(bang)}</div>
-        <div class="bxh-meta">${st.length} đội · ${rows.length} trận</div>
-        <div class="bxh-arrow open">▾</div>
-      </div>
-      <div class="bxh-body open">
-        <table class="bxh-tbl">
-          <thead><tr><th>#</th><th>Đội</th><th>T</th><th>T/B</th><th>PT</th><th>PP</th><th>HS</th></tr></thead>
-          <tbody>${st.map((s,i)=>`<tr${i<adv?' class="adv"':''}>
-            <td><span class="rank-badge ${rk(i)}">${i+1}</span></td>
-            <td><span class="bxh-team">${esc(s.team)}</span>${i<adv?'<span class="adv-tag">▲</span>':''}</td>
-            <td>${s.played}</td>
-            <td><span class="w-badge">${s.won}</span> <span class="l-badge">${s.lost}</span></td>
-            <td>${s.pf}</td><td>${s.pa}</td>
-            <td style="color:${s.pf-s.pa>=0?'var(--gn)':'var(--rd)'};font-weight:700">${s.pf-s.pa>=0?'+':''}${s.pf-s.pa}</td>
-          </tr>`).join('')}</tbody>
-        </table>
-      </div>
-    </div>`;
-  }).join('');
-}
+    return {
+      meta:`${st.length} đội · ${rows.length} trận`,
+      tbody:st.map((s,i)=>`<tr${i<adv?' class="adv"':''}>
+        <td><span class="rank-badge ${rk(i)}">${i+1}</span></td>
+        <td><span class="bxh-team">${esc(s.team)}</span>${i<adv?'<span class="adv-tag">▲</span>':''}</td>
+        <td>${s.played}</td>
+        <td><span class="w-badge">${s.won}</span> <span class="l-badge">${s.lost}</span></td>
+        <td>${s.pf}</td><td>${s.pa}</td>
+        <td style="color:${s.pf-s.pa>=0?'var(--gn)':'var(--rd)'};font-weight:700">${s.pf-s.pa>=0?'+':''}${s.pf-s.pa}</td>
+      </tr>`).join('')
+    };
+  };
 
+  const existingBxh=wrap.querySelectorAll('.bxh-card');
+  const bxhByName=new Map();
+  existingBxh.forEach(card=>{
+    const nm=card.querySelector('.bxh-bang');
+    if(nm)bxhByName.set(nm.textContent.trim(),card);
+  });
+
+  if(existingBxh.length!==sortedBangs.length){
+    // Số bảng thay đổi → full render một lần
+    wrap.innerHTML=sortedBangs.map(bang=>{
+      const {meta,tbody}=_buildBxhCard(bang);
+      return `<div class="bxh-card" data-bang="${esc(bang)}">
+        <div class="bxh-head" onclick="toggleBxh(this)">
+          <div class="bxh-bang">${esc(bang)}</div>
+          <div class="bxh-meta">${meta}</div>
+          <div class="bxh-arrow open">▾</div>
+        </div>
+        <div class="bxh-body open">
+          <table class="bxh-tbl">
+            <thead><tr><th>#</th><th>Đội</th><th>T</th><th>T/B</th><th>PT</th><th>PP</th><th>HS</th></tr></thead>
+            <tbody>${tbody}</tbody>
+          </table>
+        </div>
+      </div>`;
+    }).join('');
+  } else {
+    // Patch in-place từng bảng BXH
+    sortedBangs.forEach(bang=>{
+      const {meta,tbody}=_buildBxhCard(bang);
+      const card=bxhByName.get(bang);
+      if(!card)return;
+      const metaEl=card.querySelector('.bxh-meta');
+      if(metaEl&&metaEl.textContent!==meta) metaEl.textContent=meta;
+      const tbodyEl=card.querySelector('tbody');
+      if(tbodyEl&&tbodyEl.innerHTML!==tbody) tbodyEl.innerHTML=tbody;
+    });
+  }
+}
 function toggleBxh(head){
   const body=head.nextElementSibling;
   const arr=head.querySelector('.bxh-arrow');
@@ -1799,14 +1828,23 @@ async function autoLoginFromCache(){
 window.addEventListener('load',async()=>{
   $('gs-url').value=GAS_URL;
   if(loadSaved()&&GS&&USER_CODE){
+    // FIX v3.30: Có session hợp lệ → hiện loading, không hiện login form
+    // Tránh login screen nháy trong khi đang validate với GAS
+    $('login-screen').style.display='none';
+    const loadingEl=document.createElement('div');
+    loadingEl.id='boot-loading';
+    loadingEl.style.cssText='position:fixed;inset:0;background:var(--bg,#07101e);display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;gap:12px;';
+    loadingEl.innerHTML='<div style="font-size:28px">🏓</div><div style="color:#64748b;font-size:13px;font-family:sans-serif">Đang kết nối...</div>';
+    document.body.appendChild(loadingEl);
     const ok=await autoLoginFromCache();
+    loadingEl.remove();
     if(ok){
       startApp();
     }else{
       // validate thất bại hoặc chưa có phân quyền → xóa cache, hiện login
       localStorage.removeItem('pb_player_v6');
-      localStorage.removeItem(_LAST_ACTIVE_KEY); // FIX v3.29
-      // Không redirect, giữ màn hình login để user tự đăng nhập lại
+      localStorage.removeItem(_LAST_ACTIVE_KEY);
+      $('login-screen').style.display='flex'; // hiện lại login form
     }
   }
 });
