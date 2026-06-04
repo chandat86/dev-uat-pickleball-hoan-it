@@ -4,7 +4,7 @@
 <!-- Pickleball v67 2026-06-03: v6 FIX NGUỒN DUY NHẤT — buildDkFromResults/isMatchDone/getFinalScore/_syncResultCache/_buildLiveFromRows đều dùng key 4 trường "TênGiải|NộiDung|Bảng|MãTrận"; bỏ fallback Matches col[5/6] trong getFinalScore; bỏ giaiId duplicate trong _dK; bỏ fallback giaiId trong isMatchDone — badge Hoàn thành/Chưa đấu/Đang đấu giờ chính xác 100% từ KetQua | v66 2026-06-03: FIX v32 referee bugs — assignCourtToRef/assignRef/atrAssignDirect không xóa noidung cũ; _matchAllowed normalize dấu; renderMatchGrid hiển thị khi có trận phân tên | v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Admin v7.21 — Referee Pickleball / DA NANG ®</title>
+<title>Admin v7.22 — Referee Pickleball / DA NANG ®</title>
 <style>
 /* ═══════════════════════════════════════════════════════
    Pickleball Admin — Mobile-First Professional UI
@@ -9367,18 +9367,21 @@ function _bkApplyOverrides(tree) {
       // BYE bị thay bằng đội thực → xóa flag isBye để render bình thường
       if (ov.byeAOverridden) m.isByeA = false;
       if (ov.byeBOverridden) m.isByeB = false;
+      // v8: Admin chủ động gán BYE cho 1 slot → set isBye flag
+      if (ov.isByeA === true) { m.isByeA = true; m.teamA = ''; }
+      if (ov.isByeB === true) { m.isByeB = true; m.teamB = ''; }
     });
   });
   return tree;
 }
 
-// Chuyển "1A" → "Nhất Bảng A" để hiển thị seed label
+// Chuyển "1A" → label ngắn "1A" (v8: giữ nguyên mã ngắn thay vì "Nhất Bảng A")
 function _bkSeedCodeToLabel(code) {
   if (!code) return '';
   const mc = (code||'').trim().match(/^([1-4])([A-Z])$/i);
   if (!mc) return code; // tên đội trực tiếp hoặc label đã đầy đủ
-  const ranks = ['Nhất','Nhì','Ba','Tư'];
-  return `${ranks[parseInt(mc[1])-1]} Bảng ${mc[2].toUpperCase()}`;
+  // v8: trả về mã ngắn 1A, 2B... thay vì "Nhất Bảng A"
+  return `${mc[1]}${mc[2].toUpperCase()}`;
 }
 
 // ── localStorage helpers ─────────────────────────────────────────
@@ -10546,7 +10549,7 @@ function _bkLookupSeedCode(code) {
   if (!bangDone?.[bangKey]) return { error: `Bảng ${bangChar} chưa hoàn thành` };
   const entry = st.find(x => x.rank === rank);
   if (!entry) return { error: `Không tìm thấy hạng ${rank} Bảng ${bangChar}` };
-  return { team: entry.team, label: `${['Nhất','Nhì','Ba','Tư'][rank-1]} Bảng ${bangChar}` };
+  return { team: entry.team, label: `${rank}${bangChar}` }; // v8: label ngắn 1A, 2B...
 }
 
 function bkEditMatch(code, teamA, teamB, seedA, seedB) {
@@ -10598,9 +10601,8 @@ function bkEditMatch(code, teamA, teamB, seedA, seedB) {
       </div><!-- end sticky header -->
       <div style="flex:1;overflow-y:auto;padding:4px 24px 12px;min-height:0">
       <div style="font-size:11px;color:var(--tx3);margin-bottom:16px;line-height:1.6">
-        Nhập <b>mã seed</b> (VD: <code style="background:var(--bg3);padding:1px 5px;border-radius:3px">1A</code> = Nhất Bảng A,
-        <code style="background:var(--bg3);padding:1px 5px;border-radius:3px">2C</code> = Nhì Bảng C)<br>
-        hoặc nhập thẳng tên đội. Để trống = dùng kết quả tự động từ BXH.
+        Nhập <b>mã seed</b>: <code style="background:var(--bg3);padding:1px 5px;border-radius:3px">1A</code> = Nhất Bảng A · <code style="background:var(--bg3);padding:1px 5px;border-radius:3px">2B</code> = Nhì Bảng B · <code style="background:var(--bg3);padding:1px 5px;border-radius:3px">3C</code> = Ba Bảng C...<br>
+        Hoặc nhập thẳng tên đội. Để trống = dùng kết quả tự động từ BXH.
       </div>
 
       <!-- Slot A -->
@@ -11106,13 +11108,14 @@ function bkQuickSwapSeed(code, slot) {
   const curTeam = slot === 'A' ? (match.teamA||'') : (match.teamB||'');
   const { bangs } = _bkCalcSeeds(_bkGiai, _bkNd);
 
-  // Build danh sách tất cả seed có thể
+  // Build danh sách seed — dùng mã ngắn: 1A, 2A, 3A, 4A, 1B, 2B...
   const opts = [];
+  opts.push({ mc: 'BYE', label: 'BYE — Slot bye (bỏ qua vòng này)' });
   bangs.forEach(b => {
-    ['Nhất','Nhì','Ba','Tư'].forEach((rank, ri) => {
-      const mc = `${ri+1}${b.replace(/^Bảng\s+/i,'').trim()}`;
-      const label = `${rank} Bảng ${b.replace(/^Bảng\s+/i,'').trim()}`;
-      opts.push({ mc, label });
+    const bangChar = b.replace(/^Bảng\s+/i,'').trim();
+    [1,2,3,4].forEach(ri => {
+      const mc = `${ri}${bangChar}`;
+      opts.push({ mc, label: mc });
     });
   });
   // Add tùy chọn nhập tên trực tiếp
@@ -11123,16 +11126,28 @@ function bkQuickSwapSeed(code, slot) {
   el.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6)';
   el.innerHTML = `
     <div style="background:var(--bg2);border:1px solid var(--bdr2);border-radius:14px;
-      padding:20px;width:min(360px,96vw);box-shadow:0 16px 50px rgba(0,0,0,.4)">
+      padding:20px;width:min(400px,96vw);box-shadow:0 16px 50px rgba(0,0,0,.4)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-        <div style="font-size:14px;font-weight:700;color:var(--tx)">✏️ Đổi seed <span style="color:var(--ac)">${code} slot ${slot}</span></div>
+        <div style="font-size:14px;font-weight:700;color:var(--tx)">✏️ Chọn vị trí <span style="color:var(--ac)">${code} · Slot ${slot}</span></div>
         <button class="mc" onclick="document.getElementById('bk-qs-mo').remove()">✕</button>
       </div>
-      <div style="font-size:11px;color:var(--tx3);margin-bottom:12px">Hiện tại: <b>${esc(curSeed)||'—'}</b> · ${esc(curTeam)||'(chờ KQ)'}</div>
-      <select id="bk-qs-sel" class="inp" style="width:100%;margin-bottom:10px;font-size:13px">
-        ${opts.map(o => `<option value="${o.mc}" ${o.mc===_extractSeedCode(curSeed)?'selected':''}>${o.label}</option>`).join('')}
+      <div style="font-size:11px;color:var(--tx3);margin-bottom:10px">
+        Hiện tại: <b style="color:var(--ac)">${esc(curSeed)||'—'}</b>
+        ${curTeam ? `<span style="color:var(--tx2)"> · ${esc(curTeam)}</span>` : '<span style="opacity:.5"> · (chờ KQ)</span>'}
+      </div>
+      <div style="font-size:11px;color:var(--tx3);margin-bottom:6px;font-weight:600">Chọn seed:</div>
+      <select id="bk-qs-sel" class="inp" style="width:100%;margin-bottom:10px;font-size:14px;font-weight:700">
+        ${opts.map(o => {
+          const isBye = o.mc === 'BYE';
+          const isDivider = o.mc === '';
+          const r = (!isBye && !isDivider) ? _bkLookupSeedCode(o.mc) : null;
+          const teamHint = r && r.team ? \` — \${r.team}\` : (r ? ' — (chờ KQ)' : '');
+          const selectedAttr = o.mc === _extractSeedCode(curSeed) ? 'selected' : '';
+          return `<option value="${o.mc}" ${selectedAttr}>${o.label}${teamHint}</option>`;
+        }).join('')}
       </select>
-      <input id="bk-qs-direct" class="inp" placeholder="hoặc nhập tên đội trực tiếp..."
+      <div style="font-size:11px;color:var(--tx3);margin-bottom:6px;font-weight:600">Hoặc nhập tên đội trực tiếp:</div>
+      <input id="bk-qs-direct" class="inp" placeholder="Tên đội..."
         value="${esc(curTeam)}" style="width:100%;box-sizing:border-box;margin-bottom:14px">
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button class="btn bh bsm" onclick="document.getElementById('bk-qs-mo').remove()">Huỷ</button>
@@ -11140,12 +11155,18 @@ function bkQuickSwapSeed(code, slot) {
       </div>
     </div>`;
   document.body.appendChild(el);
-  // Khi chọn seed → auto-fill tên đội
+  // Khi chọn seed → auto-fill tên đội (trừ BYE và divider)
   document.getElementById('bk-qs-sel').addEventListener('change', function() {
     const sc = this.value;
-    if (!sc) return;
+    if (sc === 'BYE') {
+      document.getElementById('bk-qs-direct').value = '';
+      document.getElementById('bk-qs-direct').placeholder = 'BYE — không cần nhập tên';
+      return;
+    }
+    if (!sc) { document.getElementById('bk-qs-direct').placeholder = 'Tên đội...'; return; }
     const r = _bkLookupSeedCode(sc);
     if (r && r.team) document.getElementById('bk-qs-direct').value = r.team;
+    document.getElementById('bk-qs-direct').placeholder = 'Tên đội...';
   });
 }
 
@@ -11162,6 +11183,21 @@ function bkApplyQuickSwap(code, slot) {
   const direct  = (document.getElementById('bk-qs-direct')?.value||'').trim();
   const ov = _bkOverrides[code] || {};
 
+  // Xử lý trường hợp chọn BYE
+  if (selVal === 'BYE') {
+    if (slot === 'A') {
+      _bkOverrides[code] = { ...ov, teamA: '', seedCodeA: '', isByeA: true, byeAOverridden: false };
+    } else {
+      _bkOverrides[code] = { ...ov, teamB: '', seedCodeB: '', isByeB: true, byeBOverridden: false };
+    }
+    _bkSaveOverrides();
+    document.getElementById('bk-qs-mo')?.remove();
+    bkRender();
+    toast(`✅ ${code} slot ${slot}: BYE · Đã lưu`, 'ok');
+    _bkSyncOverrideToSchedule(code).catch(()=>{});
+    return;
+  }
+
   let team = direct;
   if (selVal) {
     const r = _bkLookupSeedCode(selVal);
@@ -11169,9 +11205,9 @@ function bkApplyQuickSwap(code, slot) {
   }
 
   if (slot === 'A') {
-    _bkOverrides[code] = { ...ov, teamA: team, seedCodeA: selVal };
+    _bkOverrides[code] = { ...ov, teamA: team, seedCodeA: selVal, isByeA: false, byeAOverridden: !!team };
   } else {
-    _bkOverrides[code] = { ...ov, teamB: team, seedCodeB: selVal };
+    _bkOverrides[code] = { ...ov, teamB: team, seedCodeB: selVal, isByeB: false, byeBOverridden: !!team };
   }
   _bkSaveOverrides();
   document.getElementById('bk-qs-mo')?.remove();
