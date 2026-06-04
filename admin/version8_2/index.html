@@ -4,7 +4,7 @@
 <!-- Pickleball v67 2026-06-03: v6 FIX NGUỒN DUY NHẤT — buildDkFromResults/isMatchDone/getFinalScore/_syncResultCache/_buildLiveFromRows đều dùng key 4 trường "TênGiải|NộiDung|Bảng|MãTrận"; bỏ fallback Matches col[5/6] trong getFinalScore; bỏ giaiId duplicate trong _dK; bỏ fallback giaiId trong isMatchDone — badge Hoàn thành/Chưa đấu/Đang đấu giờ chính xác 100% từ KetQua | v66 2026-06-03: FIX v32 referee bugs — assignCourtToRef/assignRef/atrAssignDirect không xóa noidung cũ; _matchAllowed normalize dấu; renderMatchGrid hiển thị khi có trận phân tên | v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Admin v8.2.2.41 — Referee Pickleball / DA NANG ®</title>
+<title>Admin v8.241 — Referee Pickleball / DA NANG ®</title>
 <style>
 /* ═══════════════════════════════════════════════════════
    Pickleball Admin — Mobile-First Professional UI
@@ -11843,15 +11843,15 @@ async function bkApplyAndSave() {
   if (koMatches.length > 0) {
     toast('🗑 Đang xóa lịch KO cũ để tạo lại...', 'in');
     try {
+      // Tăng timeout lên 45s — GAS xóa nhiều rows cần thời gian
       const delResult = await gPost({
         action: 'deleteBracketTree',
         adminCode: CODE,
         giai: giaiName,
         nd: _bkNd,
-        onlyKO: true // v8: chỉ xóa KO, không xóa Vòng bảng
-      });
+        onlyKO: true
+      }, 45000);
       if (delResult.ok) {
-        // Xóa khỏi _M local
         const keepM = _M.filter(m => {
           if (String(m[0]||'')!==giaiName || String(m[1]||'')!==_bkNd) return true;
           const v = String(m[9]||'');
@@ -11861,7 +11861,6 @@ async function bkApplyAndSave() {
         console.log('[Apply] Đã xóa', koMatches.length, 'KO matches cũ');
       }
     } catch(e) { console.warn('[Apply] Không xóa được KO cũ:', e); }
-    // Reset koByCode sau khi xóa — tạo mới tất cả
     Object.keys(koByCode).forEach(k => delete koByCode[k]);
   }
 
@@ -11904,47 +11903,40 @@ async function bkApplyAndSave() {
 
   try {
     let ok = 0;
-    // Tạo mới theo batch 3 — fallback updateMatch nếu GAS báo đã tồn tại
-    const chunks = [];
-    for(let i=0;i<toCreate.length;i+=3) chunks.push(toCreate.slice(i,i+3));
-    for (const ch of chunks) {
-      await Promise.all(ch.map(async ({row,code}) => {
-        try {
-          const d = await gPost({action:'addMatchAdmin',adminCode:CODE,row});
-          if (d.ok) {
-            ok++;
-            _M.push(normalizeMatchRow(row));
-          } else {
-            // GAS báo đã tồn tại (mã trùng từ nội dung khác) → thử updateMatch
-            const isExist = (d.reason||'').includes('tồn tại') || (d.reason||'').includes('exist') || (d.reason||'').includes('duplicate');
-            if (isExist) {
-              const d2 = await gPost({action:'updateMatch',adminCode:CODE,
-                giai:giaiName,giaiName,bang:String(row[2]||''),code,row});
-              if (d2?.ok) {
-                ok++;
-                const idx = _M.findIndex(r=>String(r[0]||'')===giaiName&&String(r[1]||'')===_bkNd&&String(r[3]||'')===code);
-                if (idx>=0) _M[idx]=normalizeMatchRow(row); else _M.push(normalizeMatchRow(row));
-              } else {
-                toast(`⚠️ ${code}: ${d2?.reason||d.reason||'Lỗi'}`, 'er');
-              }
-            } else {
-              toast(`⚠️ ${code}: ${d.reason||'Lỗi'}`, 'er');
-            }
+
+    // ── v8 FIX: Dùng addMatchesBatch — 1 request duy nhất thay vì N requests song song ──
+    // Tránh GAS timeout và "lỗi mạng" khi tạo 16-32 trận cùng lúc
+    if (toCreate.length > 0) {
+      const batchRows = toCreate.map(({row}) => row);
+      try {
+        const batchResult = await gPost({
+          action: 'addMatchesBatch',
+          adminCode: CODE,
+          rows: batchRows
+        }, 45000); // Tăng timeout 45s cho batch lớn
+        if (batchResult.ok) {
+          ok += batchResult.added || 0;
+          // Thêm vào _M local
+          toCreate.forEach(({row}) => _M.push(normalizeMatchRow(row)));
+          if (batchResult.skipped > 0) {
+            console.log('[Apply] Batch skip', batchResult.skipped, 'trận đã tồn tại');
           }
-        } catch(e) { toast(`⚠️ ${code}: lỗi mạng`,'er'); }
-      }));
+        } else {
+          toast(`⚠️ Lỗi tạo lịch: ${batchResult.reason || 'Không rõ'}`, 'er');
+        }
+      } catch(e) {
+        toast(`❌ Lỗi mạng khi tạo lịch hàng loạt: ${e.message}`, 'er');
+      }
     }
-    // Cập nhật
+
+    // Cập nhật các trận đã tồn tại (thường rất ít)
     for (const {row, code, existing, isNew} of toUpdate) {
       try {
         if (isNew) {
-          // Trường hợp mã trùng nội dung khác → thử add trước, fallback update
           const dAdd = await gPost({action:'addMatchAdmin', adminCode:CODE, row});
           if (dAdd?.ok) {
-            ok++;
-            _M.push(normalizeMatchRow(row)); dedupM();
+            ok++; _M.push(normalizeMatchRow(row)); dedupM();
           } else {
-            // GAS báo tồn tại → update
             const dUpd = await gPost({action:'updateMatch', adminCode:CODE,
               giai:giaiName, giaiName, bang:String(row[2]||''), code, row});
             if (dUpd?.ok) {
@@ -11954,15 +11946,15 @@ async function bkApplyAndSave() {
             }
           }
         } else {
-          const d = await gPost({action:'updateMatch',adminCode:CODE,
-            giai:giaiName,giaiName,bang:String(existing[2]||''),code,row});
+          const d = await gPost({action:'updateMatch', adminCode:CODE,
+            giai:giaiName, giaiName, bang:String(existing[2]||''), code, row});
           if (d.ok) {
-            const idx=_M.findIndex(r=>r[0]===giaiName&&r[1]===_bkNd&&r[3]===code);
-            if(idx>=0) _M[idx]=normalizeMatchRow(row);
+            const idx = _M.findIndex(r=>r[0]===giaiName&&r[1]===_bkNd&&r[3]===code);
+            if (idx>=0) _M[idx]=normalizeMatchRow(row);
             ok++;
           }
         }
-      } catch(e) {}
+      } catch(e) { console.warn('[Apply] Update error:', code, e); }
     }
 
     dedupM();
