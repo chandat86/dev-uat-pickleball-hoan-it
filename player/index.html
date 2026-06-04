@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>Pickleball v3.22— Xem Giải Đấu</title>
+<title>Pickleball v3.23— Xem Giải Đấu</title>
 <style>
 /* system font - no import needed */
 :root{
@@ -1364,7 +1364,7 @@ function renderBracketTab(){
   }
   // v37: Ưu tiên snapshot từ GAS (source of truth), fallback sang rebuild local
   const cached=_bkTreeCache[nd];
-  if(cached&&cached.tree){
+  if(cached&&cached.rounds){
     // Có snapshot cache → render ngay, đồng thời check version ngầm
     wrap.innerHTML='<div id="bk-inner"></div>';
     _bkRenderFromSnapshot(nd,cached,$('bk-inner'));
@@ -1399,12 +1399,12 @@ function renderBracketTab(){
 
 // v37: Render cây thi đấu từ snapshot data (không rebuild từ seeds)
 function _bkRenderFromSnapshot(nd,snap,wrap){
-  if(!snap||!snap.tree||!snap.tree.rounds){
+  if(!snap||!snap.rounds||!snap.rounds.length){
     // Snapshot rỗng hoặc chưa áp dụng → fallback rebuild
     _bkBuildAndRenderTree(nd,wrap);
     return;
   }
-  const roundMatches=snap.rounds||snap.tree?.rounds||[];
+  const roundMatches=snap.rounds||[];
   const overrides=snap._overrides||snap.overrides||{};
   const gUp=((_giaiName||USER_GIAI||'')).toUpperCase();
   // Lấy KO matches từ _M để check done/live
