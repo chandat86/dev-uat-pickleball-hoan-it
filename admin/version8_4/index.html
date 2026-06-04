@@ -4,7 +4,7 @@
 <!-- Pickleball v72 2026-06-04: FIX Xóa tất cả bảng dùng 1 request deleteAllBangs thay vì N requests tuần tự — nhanh gấp 15x; bỏ confirm() dùng double-tap | v71 2026-06-04: FIX saveBang+importMultiBang gửi upsert=true → GAS xóa bảng cũ trước khi tạo lại, tránh dedup skip trận | v70 2026-06-04: FIX bkDeleteTree dùng double-tap thay confirm() bị browser block; GAS v37 fix giaiName undefined trong deleteBracketTree | v69 2026-06-04: FIX confirm() trong bkApplyAndSave bị browser block → return sớm không save BracketTree; thay bằng toast cảnh báo tiếp tục luôn | v68 2026-06-04: FIX saveBracketTree bị bỏ qua khi Apply lần 2 (toCreate=0, toUpdate=0 → return sớm trước khi save GSheet) | v67 2026-06-03: v6 FIX NGUỒN DUY NHẤT — buildDkFromResults/isMatchDone/getFinalScore/_syncResultCache/_buildLiveFromRows đều dùng key 4 trường "TênGiải|NộiDung|Bảng|MãTrận"; bỏ fallback Matches col[5/6] trong getFinalScore; bỏ giaiId duplicate trong _dK; bỏ fallback giaiId trong isMatchDone — badge Hoàn thành/Chưa đấu/Đang đấu giờ chính xác 100% từ KetQua | v66 2026-06-03: FIX v32 referee bugs — assignCourtToRef/assignRef/atrAssignDirect không xóa noidung cũ; _matchAllowed normalize dấu; renderMatchGrid hiển thị khi có trận phân tên | v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Admin v8.4 — Referee Pickleball / DA NANG ®</title>
+<title>Admin v8.33 — Referee Pickleball / DA NANG ®</title>
 <style>
 /* ═══════════════════════════════════════════════════════
    Pickleball Admin — Mobile-First Professional UI
@@ -10698,8 +10698,11 @@ async function bkAutoFill() {
         } else {
           const curA = String(existing[4]||''), curB = String(existing[7]||'');
           // Luôn update nếu tree có tên đội mới (tA/tB khác '' và khác hiện tại)
-          const shouldUpdateA = tA && tA !== 'TBD' && tA !== curA;
-          const shouldUpdateB = tB && tB !== 'TBD' && tB !== curB;
+          // FIX v75: Nếu slot là BYE trong cây nhưng Matches sheet còn team cũ → CLEAR
+          const shouldUpdateA = (tA && tA !== 'TBD' && tA !== curA)
+                             || (m.isByeA && curA !== '');
+          const shouldUpdateB = (tB && tB !== 'TBD' && tB !== curB)
+                             || (m.isByeB && curB !== '');
           if (shouldUpdateA || shouldUpdateB) {
             const r2 = [...existing];
             if (shouldUpdateA) r2[4] = tA;
@@ -11789,8 +11792,11 @@ async function _bkDoSyncToSchedule() {
 
       // Trận đã tồn tại — kiểm tra có cần update tên đội không
       const curA = String(existing[4]||''), curB = String(existing[7]||'');
-      const updateA = tA && tA !== 'TBD' && tA !== curA;
-      const updateB = tB && tB !== 'TBD' && tB !== curB;
+      // FIX v75: Nếu slot là BYE trong cây nhưng Matches sheet còn team cũ → CLEAR
+      const updateA = (tA && tA !== 'TBD' && tA !== curA)
+                   || (m.isByeA && curA !== '');
+      const updateB = (tB && tB !== 'TBD' && tB !== curB)
+                   || (m.isByeB && curB !== '');
       if (!updateA && !updateB) continue;
 
       const newRow = [...existing];
