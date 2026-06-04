@@ -9014,9 +9014,26 @@ function _bkCrossSeededSlots(globalSeeds, bangs, seeds) {
   const W = i => byBang[bangList[i]]?.w ?? null;
   const R = i => byBang[bangList[i]]?.r ?? null;
 
-  // BYE: bảng đầu alphabet được BYE (bracket chốt trước vòng bảng)
+  // ── BYE FAIRNESS FIX (v7): BYE trao cho đội đã đánh NHIỀU trận nhất ──
+  // Bảng 3 đội: mỗi đội đánh 2 trận. Bảng 4 đội: mỗi đội đánh 3 trận.
+  // Đội bảng nhỏ hơn đã được lợi ở vòng bảng (ít trận hơn) →
+  // KHÔNG nên được thêm BYE trong cây thi đấu.
+  // BYE phải trao cho đội đã thi đấu nhiều nhất (bảng lớn hơn).
+  //
+  // Cách tính: số đội trong bảng = seeds[bang].length
+  // Bảng càng nhiều đội → mỗi đội đánh nhiều trận hơn → xứng đáng BYE hơn
   const numByes       = cap - nb * 2;
   const numWinnerByes = Math.min(numByes, nb);
+
+  // Sắp xếp bảng theo số đội GIẢM DẦN (bảng nhiều đội được BYE trước)
+  // Nếu bằng nhau → theo alphabet (ổn định)
+  const bangsBySize = [...bangList].sort((a, b) => {
+    const sizeA = (seeds[a] || []).length;
+    const sizeB = (seeds[b] || []).length;
+    return (sizeB - sizeA) || a.localeCompare(b); // nhiều đội hơn → BYE trước
+  });
+  // Tập hợp những bảng được trao BYE (numWinnerByes bảng có nhiều đội nhất)
+  const byeBangs = new Set(bangsBySize.slice(0, numWinnerByes).map(b => b));
 
   // raw arrays: p1 chứa W của bảng chẵn + R của bảng lẻ (và ngược lại cho p2)
   // → W(i) và R(i) luôn ở 2 array khác nhau ✅
@@ -9032,8 +9049,8 @@ function _bkCrossSeededSlots(globalSeeds, bangs, seeds) {
   const buildBranch = (rawArr) => {
     const byeSlots = [], regular = [];
     rawArr.forEach(seed => {
-      const bi = bangList.indexOf(seed?.bang ?? '');
-      if (bi >= 0 && bi < numWinnerByes && seed?.seedRank === 1) {
+      // v7 FIX: BYE trao cho bảng nhiều đội nhất (byeBangs), không phải alphabet
+      if (seed?.seedRank === 1 && byeBangs.has(seed?.bang ?? '')) {
         byeSlots.push(seed);
       } else {
         regular.push(seed);
