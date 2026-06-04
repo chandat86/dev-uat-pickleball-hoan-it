@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- Pickleball v67 2026-06-03: v6 FIX NGUỒN DUY NHẤT — buildDkFromResults/isMatchDone/getFinalScore/_syncResultCache/_buildLiveFromRows đều dùng key 4 trường "TênGiải|NộiDung|Bảng|MãTrận"; bỏ fallback Matches col[5/6] trong getFinalScore; bỏ giaiId duplicate trong _dK; bỏ fallback giaiId trong isMatchDone — badge Hoàn thành/Chưa đấu/Đang đấu giờ chính xác 100% từ KetQua | v66 2026-06-03: FIX v32 referee bugs — assignCourtToRef/assignRef/atrAssignDirect không xóa noidung cũ; _matchAllowed normalize dấu; renderMatchGrid hiển thị khi có trận phân tên | v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
+<!-- Pickleball v68 2026-06-04: FIX saveBracketTree bị bỏ qua khi Apply lần 2 (toCreate=0, toUpdate=0 → return sớm trước khi save GSheet) | v67 2026-06-03: v6 FIX NGUỒN DUY NHẤT — buildDkFromResults/isMatchDone/getFinalScore/_syncResultCache/_buildLiveFromRows đều dùng key 4 trường "TênGiải|NộiDung|Bảng|MãTrận"; bỏ fallback Matches col[5/6] trong getFinalScore; bỏ giaiId duplicate trong _dK; bỏ fallback giaiId trong isMatchDone — badge Hoàn thành/Chưa đấu/Đang đấu giờ chính xác 100% từ KetQua | v66 2026-06-03: FIX v32 referee bugs — assignCourtToRef/assignRef/atrAssignDirect không xóa noidung cũ; _matchAllowed normalize dấu; renderMatchGrid hiển thị khi có trận phân tên | v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Admin v8.212 — Referee Pickleball / DA NANG ®</title>
+<title>Admin v8.2212 — Referee Pickleball / DA NANG ®</title>
 <style>
 /* ═══════════════════════════════════════════════════════
    Pickleball Admin — Mobile-First Professional UI
@@ -12051,6 +12051,37 @@ async function bkApplyAndSave() {
 
   if (!toCreate.length && !toUpdate.length) {
     toast(`✅ Lịch vòng trong đã đúng, không cần cập nhật (${skipped} trận không đổi)`, 'ok');
+    // v8 FIX: Vẫn phải save BracketTree dù không có trận mới — lần Apply đầu tiên
+    // tạo trận thành công nhưng BracketTree chưa được lưu (return sớm bỏ qua save)
+    try {
+      const giaiName2 = _resolveGiaiName(_bkGiai) || _bkGiai;
+      const { seeds: _s2, bangs: _b2, bangDone: _bd2 } = _bkCalcSeeds(_bkGiai, _bkNd);
+      const allM2 = _M.filter(m=>String(m[0]||'')===giaiName2&&String(m[1]||'')===_bkNd);
+      const koM2  = allM2.filter(m=>{const v=String(m[9]||'');return v&&v!=='Vòng bảng'&&!v.includes('bảng');});
+      if (koM2.length > 0) {
+        let treeNow = _bkBuildTree(_s2, _b2, koM2, _bd2);
+        treeNow = _bkApplyOverrides(treeNow);
+        treeNow = _bkResolveAdvancers(treeNow, koM2);
+        _bkCurrentTree = treeNow;
+        if (treeNow?.rounds?.length) {
+          const treeToSave = { ...treeNow, _overrides:_bkOverrides, _byeRule:_bkByeRule, _savedAt:Date.now() };
+          const totalM = treeNow.rounds.reduce((s,r)=>s+(r.matches?.length||0),0);
+          console.log('[BK TREE] Saving (no-change path):', giaiName2, _bkNd, totalM, 'matches');
+          const ds = await gPost({action:'saveBracketTree', adminCode:CODE, giai:giaiName2, nd:_bkNd, tree:treeToSave}, 45000);
+          if (ds.ok) {
+            _bkLastVersion = ds.version || Date.now();
+            _bkApplied = true;
+            console.log('[BK TREE] ✓ Saved (no-change path) v', _bkLastVersion);
+            toast('☁️ Cây đã đồng bộ GSheet (' + totalM + ' trận)', 'ok', 2500);
+          } else {
+            console.error('[BK TREE] ✗ Save failed (no-change path):', ds.reason);
+            toast('⚠️ Chưa đồng bộ GSheet: ' + (ds.reason||'lỗi'), 'er', 4000);
+          }
+        }
+      }
+    } catch(eSave) {
+      console.error('[BK TREE] Save error (no-change path):', eSave);
+    }
     if (btn) { btn.disabled=false; btn.textContent='⚡ Áp dụng & Tạo lịch vòng trong'; }
     return;
   }
