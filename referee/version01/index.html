@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- Pickleball v8.10 2026-06-04: FIX sb-action-bar căn giữa tỉ số (3-col grid + ex-side groups); hai card cân đối | v8.9 2026-06-04: FIX loadAllFromGS — REPLACE thay vì MERGE S.results từ GAS (source of truth); xóa bảng+tạo lại không còn bị stale "Hoàn thành" trên màn hình trọng tài | v8.8 2026-06-03: FIX swapPlayersDisplay — chấm cam giữ nguyên ô vật lý khi swap tên VĐV | v8.7; player-slot fixed height 44px; serve-balls min-width giữ chỗ | v8.6: auto-cleanup kết quả (TTL 1 ngày, cap 100) + nhật ký (TTL 12h, cap 300) | v8.5: FIX v34 — auto-hide polling-driven (CK có điểm từ GAS → ẩn ngay); | v8.4 FIX v33 — auto-hide nội dung/giải khi CK hoàn thành; sort trận (live→chưa đấu→hoàn thành); nút ẩn/hiện trận HT; | v8.2 FIX v32 — _removeDiacritics normalize tên TT; renderMatchGrid hiển thị khi có trận phân tên dù courts=[]; | v8.1 FIX: Park priority in renderMatchCard — tỉ số tím đúng khi switch trận | 2026-05-23 -->
+<!-- Pickleball v8.11 2026-06-04: FIX CRITICAL — thêm </div> đóng sb-teams-row; sb-action-bar không còn nằm trong grid 2-cột → 2 card cân đối 50/50 | v8.10 2026-06-04: FIX sb-action-bar căn giữa tỉ số (3-col grid + ex-side groups); hai card cân đối | v8.9 2026-06-04: FIX loadAllFromGS — REPLACE thay vì MERGE S.results từ GAS (source of truth); xóa bảng+tạo lại không còn bị stale "Hoàn thành" trên màn hình trọng tài | v8.8 2026-06-03: FIX swapPlayersDisplay — chấm cam giữ nguyên ô vật lý khi swap tên VĐV | v8.7; player-slot fixed height 44px; serve-balls min-width giữ chỗ | v8.6: auto-cleanup kết quả (TTL 1 ngày, cap 100) + nhật ký (TTL 12h, cap 300) | v8.5: FIX v34 — auto-hide polling-driven (CK có điểm từ GAS → ẩn ngay); | v8.4 FIX v33 — auto-hide nội dung/giải khi CK hoàn thành; sort trận (live→chưa đấu→hoàn thành); nút ẩn/hiện trận HT; | v8.2 FIX v32 — _removeDiacritics normalize tên TT; renderMatchGrid hiển thị khi có trận phân tên dù courts=[]; | v8.1 FIX: Park priority in renderMatchCard — tỉ số tím đúng khi switch trận | 2026-05-23 -->
 <meta charset="UTF-8">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>v3 - Da Nang Referee v17 – Pickleball</title>
+<title>v2.523 - Da Nang Referee v17 – Pickleball</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Inter:wght@400;500;600;700&display=swap');
 
@@ -986,6 +986,7 @@ select, input { font-family: inherit; }
         <button class="sc-btn plus"  onclick="addScore('b',1)">+</button>
       </div>
     </div>
+  </div><!-- /sb-teams-row -->
   <!-- Hàng ngang: [T/O A · Med A] · [tỉ số] · [T/O B · Med B] — căn giữa tỉ số -->
   <div class="sb-action-bar">
     <div class="ex-side left">
