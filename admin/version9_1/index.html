@@ -7354,9 +7354,9 @@ async function openEditMatchMo(giaiId, nd, bang, code) {
   // giờ thi đấu: parse ISO "1899-12-30T01:08:30.000Z" → "08:15" cho input type=time
   const _parseTime=(v)=>{
     if(!v)return'';
-    // ISO từ GAS (UTC): cộng 7h về giờ VN
+    // ISO còn sót (data cũ): cộng 7h về giờ VN
     const iso=(v+'').match(/T(\d{2}):(\d{2})/);
-    if(iso){const totalMin=parseInt(iso[1])*60+parseInt(iso[2])+420;const h=Math.floor(totalMin/60)%24,mi=totalMin%60;return String(h).padStart(2,'0')+':'+String(mi).padStart(2,'0');}
+    if(iso){const tm=parseInt(iso[1])*60+parseInt(iso[2])+420;const h=Math.floor(tm/60)%24,mi=tm%60;return String(h).padStart(2,'0')+':'+String(mi).padStart(2,'0');}
     // HH:MM thường
     const hm=(v+'').match(/^(\d{1,2}):(\d{2})/);if(hm)return String(parseInt(hm[1])).padStart(2,'0')+':'+hm[2];
     return '';
