@@ -3,8 +3,8 @@
 <head>
 <!-- Pickleball v67 2026-06-03: v6 FIX NGUỒN DUY NHẤT — buildDkFromResults/isMatchDone/getFinalScore/_syncResultCache/_buildLiveFromRows đều dùng key 4 trường "TênGiải|NộiDung|Bảng|MãTrận"; bỏ fallback Matches col[5/6] trong getFinalScore; bỏ giaiId duplicate trong _dK; bỏ fallback giaiId trong isMatchDone — badge Hoàn thành/Chưa đấu/Đang đấu giờ chính xác 100% từ KetQua | v66 2026-06-03: FIX v32 referee bugs — assignCourtToRef/assignRef/atrAssignDirect không xóa noidung cũ; _matchAllowed normalize dấu; renderMatchGrid hiển thị khi có trận phân tên | v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
-<meta name="viwport" content="width=device-width,initial-scale=1.0">
-<title>Admin v8.2.41 — Referee Pickleball / DA NANG ®</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Admin v8.2.2.41 — Referee Pickleball / DA NANG ®</title>
 <style>
 /* ═══════════════════════════════════════════════════════
    Pickleball Admin — Mobile-First Professional UI
@@ -9497,25 +9497,42 @@ async function _bkLoadTreeFromSheet() {
 
 // Lưu cây lên GSheet BracketTree (POST)
 async function _bkSaveTreeToSheet() {
-  if (!_bkGiai || !_bkNd || !_bkCurrentTree || !GS || !CODE) return;
+  if (!_bkGiai || !_bkNd || !GS || !CODE) {
+    console.warn('[BK TREE] Skip save — missing giai/nd/GS/CODE:', {_bkGiai, _bkNd, hasGS:!!GS, hasCode:!!CODE});
+    return;
+  }
+  if (!_bkCurrentTree) {
+    console.warn('[BK TREE] Skip save — _bkCurrentTree is null/undefined');
+    return;
+  }
+  const rounds = _bkCurrentTree?.rounds;
+  if (!rounds || !rounds.length) {
+    console.warn('[BK TREE] Skip save — tree has no rounds');
+    return;
+  }
   try {
     const giaiName = _resolveGiaiName(_bkGiai) || _bkGiai;
-    // Embed overrides + byeRule vào tree để client không cần gọi riêng
     const treeToSave = {
       ..._bkCurrentTree,
       _overrides: _bkOverrides,
       _byeRule:   _bkByeRule,
       _savedAt:   Date.now(),
     };
+    const totalMatches = rounds.reduce((s, r) => s + (r.matches?.length || 0), 0);
+    console.log('[BK TREE] Saving tree:', giaiName, _bkNd, '— rounds:', rounds.length, 'matches:', totalMatches);
     const d = await gPost({ action:'saveBracketTree', adminCode:CODE, giai:giaiName, nd:_bkNd, tree:treeToSave });
     if (d.ok) {
       _bkLastVersion = d.version || Date.now();
-      console.log('[BK TREE] Saved to GSheet v', _bkLastVersion);
-      toast('☁️ Cây thi đấu đã đồng bộ lên GSheet', 'ok', 2000);
+      console.log('[BK TREE] ✓ Saved to GSheet v', _bkLastVersion, '— saved matches:', d.saved);
+      toast('☁️ Cây thi đấu đã đồng bộ GSheet (' + totalMatches + ' trận)', 'ok', 2500);
     } else {
-      console.warn('[BK TREE] Save failed:', d.reason);
+      console.error('[BK TREE] ✗ Save failed:', d.reason || d);
+      toast('⚠️ Chưa đồng bộ cây lên GSheet: ' + (d.reason || 'lỗi không rõ'), 'er', 4000);
     }
-  } catch(e) { console.warn('[BK TREE] Save error:', e); }
+  } catch(e) {
+    console.error('[BK TREE] Save error:', e);
+    toast('⚠️ Lỗi đồng bộ cây: ' + (e.message || e), 'er', 4000);
+  }
 }
 
 // Debounce lưu overrides + push tree lên GSheet
@@ -9647,6 +9664,10 @@ function bkRender() {
   tree = _bkApplyOverrides(tree);
   // Re-resolve winners cho vòng sau dựa trên tên đã được override + kết quả Sheet
   tree = _bkResolveAdvancers(tree, koMatches);
+
+  // v37 FIX: Set _bkCurrentTree ngay sau khi build — không phụ thuộc vào UI elements
+  // Trước đây chỉ set trong _bkUpdateSeedPanel → nếu bk-seed-panel không tồn tại thì null mãi
+  _bkCurrentTree = tree;
 
   // bangDone is now computed in _bkCalcSeeds
   const completedBangs = bangs.filter(b => bangDone?.[b]).length;
@@ -11947,7 +11968,19 @@ async function bkApplyAndSave() {
     dedupM();
     toast(`✅ Đã tạo ${toCreate.length} trận · Cập nhật ${toUpdate.length} trận · Bỏ qua ${skipped}`, 'ok');
     await _bkPushOverridesToGAS();
-    bkRender(); // rebuild _bkCurrentTree với teams mới
+    // v37 FIX: bkRender() giờ set _bkCurrentTree ngay sau build → gọi trước _bkSaveTreeToSheet
+    bkRender();
+    // Đảm bảo _bkCurrentTree đã được set trước khi save lên GSheet
+    if (!_bkCurrentTree) {
+      // Fallback: build tree thủ công nếu bkRender không set được
+      const { seeds: s2, bangs: b2, bangDone: bd2 } = _bkCalcSeeds(_bkGiai, _bkNd);
+      const allM2 = _M.filter(m=>String(m[0]||'')===giaiName&&String(m[1]||'')===_bkNd);
+      const koM2  = allM2.filter(m=>{const v=String(m[9]||'');return v&&v!=='Vòng bảng'&&!v.includes('bảng');});
+      let t2 = _bkBuildTree(s2, b2, koM2, bd2);
+      t2 = _bkApplyOverrides(t2);
+      t2 = _bkResolveAdvancers(t2, koM2);
+      _bkCurrentTree = t2;
+    }
     // v37: Lưu cây lên GSheet BracketTree — đây là nguồn đồng bộ duy nhất
     await _bkSaveTreeToSheet();
   } catch(e) {
