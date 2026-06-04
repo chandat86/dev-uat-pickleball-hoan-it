@@ -4,7 +4,7 @@
 <!-- Pickleball v67 2026-06-03: v6 FIX NGUỒN DUY NHẤT — buildDkFromResults/isMatchDone/getFinalScore/_syncResultCache/_buildLiveFromRows đều dùng key 4 trường "TênGiải|NộiDung|Bảng|MãTrận"; bỏ fallback Matches col[5/6] trong getFinalScore; bỏ giaiId duplicate trong _dK; bỏ fallback giaiId trong isMatchDone — badge Hoàn thành/Chưa đấu/Đang đấu giờ chính xác 100% từ KetQua | v66 2026-06-03: FIX v32 referee bugs — assignCourtToRef/assignRef/atrAssignDirect không xóa noidung cũ; _matchAllowed normalize dấu; renderMatchGrid hiển thị khi có trận phân tên | v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Admin v7 — Referee Pickleball / DA NANG ®</title>
+<title>Admin v7.3 — Referee Pickleball / DA NANG ®</title>
 <style>
 /* ═══════════════════════════════════════════════════════
    Pickleball Admin — Mobile-First Professional UI
@@ -6388,6 +6388,14 @@ async function _ndBkRender() {
   const giaiName = _bkGiaiName || _resolveGiaiName(_bkGiai) || _bkGiai;
   const hasCacheData = _M.some(m => String(m[0]||'') === giaiName && String(m[1]||'') === _bkNd);
 
+  // v7: Nếu có KO matches trong _M → cây đã tồn tại → reset _bkIsEmpty
+  const hasKO = _M.some(m => {
+    if (String(m[0]||'') !== giaiName || String(m[1]||'') !== _bkNd) return false;
+    const v = String(m[9]||'');
+    return v && v !== 'Vòng bảng' && !/^bảng\s+[a-z0-9]/i.test(v);
+  });
+  if (hasKO) _bkIsEmpty = false;
+
   if (hasCacheData && !ndChanged) {
     // DATA ĐÃ CÓ TRONG MEMORY → render ngay, không cần network
     _renderNow();
@@ -9372,6 +9380,7 @@ let _bkOvSaveTimer  = null; // debounce save
 let _bkGasPollTimer = null; // auto-poll GAS bracket overrides (sync giữa các admin)
 let _bkLastVersion  = 0;    // v7: timestamp version từ GAS — chỉ fetch full khi có thay đổi
 let _bkDeletedAt    = 0;    // v7: timestamp khi vừa xóa cây — block mọi auto-render trong 5s
+let _bkIsEmpty      = false; // v7: true = cây đã bị xóa, bkRender hiện trống thay vì rebuild từ seeding
 
 function _bkLoadOverrides() {
   // 1. Trả về cache localStorage ngay để UI không bị trống
@@ -9501,6 +9510,14 @@ function bkRender() {
   const status = document.getElementById('bk-status') || document.getElementById('nd-bk-status');
   if (!_bkGiai || !_bkNd) {
     wrap.innerHTML = '<div class="empty"><div class="ei">🏆</div><p>Chọn giải và nội dung thi đấu</p></div>';
+    return;
+  }
+  // v7: Sau khi xóa cây, hiện màn trống — KHÔNG rebuild từ seeding
+  // Chỉ reset khi user chủ động nhấn "Tạo cây" hoặc "Áp dụng & Tạo lịch"
+  if (_bkIsEmpty) {
+    const ndWrap = document.getElementById('nd-bk-wrap') || wrap;
+    ndWrap.innerHTML = '<div class="empty"><div class="ei">🏆</div><p>Cây thi đấu đã xóa · Nhấn <b>🏗 Tạo cây</b> để tạo mới</p></div>';
+    if (status) status.innerHTML = '';
     return;
   }
   const { seeds, bangs, bangDone } = _bkCalcSeeds(_bkGiai, _bkNd);
@@ -9917,6 +9934,7 @@ async function ndBkGenChart() {
 
   try {
     _bkDeletedAt = 0; // v7: user chủ động tạo → cho phép render trở lại
+    _bkIsEmpty   = false; // v7: cho phép bkRender rebuild từ seeding
     // Tính seeding từ BXH hiện tại
     const { seeds, bangs, bangDone } = _bkCalcSeeds(_bkGiai, _bkNd);
     if (!bangs.length) {
@@ -9957,6 +9975,7 @@ async function ndBkApplyFull() {
     // v7: Bật lại auto-mode + cả 2 poll timer sau khi áp dụng thành công
     if (!_bkEditMode) {
       _bkDeletedAt = 0;          // reset delete flag — cho phép auto-render trở lại
+      _bkIsEmpty   = false;      // reset empty flag — cây đã có data thật
       _bkAutoMode = true;
       _bkStartAutoPolling();   // auto điền khi có kết quả
       _bkStartSyncPoll();      // sync bracket giữa các admin
@@ -12182,6 +12201,7 @@ async function bkDeleteTree() {
       _bkStopAutoPolling();
       _bkStopSyncPoll();
       _bkDeletedAt = Date.now(); // v7: flag block mọi auto-render trong 5s
+      _bkIsEmpty   = true;       // v7: bkRender hiện trống thay vì rebuild từ seeding
 
       // 2. Xóa cache tree + overrides trong memory
       _bkCurrentTree = null;
