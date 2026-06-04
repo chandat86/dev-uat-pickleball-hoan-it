@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>Pickleball v3.33— Xem Giải Đấu</title>
+<title>Pickleball v3.34— Xem Giải Đấu</title>
 <style>
 /* system font - no import needed */
 :root{
@@ -151,6 +151,8 @@ body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100vh
 .lc-ftr{display:flex;align-items:center;justify-content:space-between;padding:7px 12px;
   border-top:1px solid var(--bdr);background:rgba(0,0,0,.15)}
 .lc-court{font-size:11px;color:var(--ac);font-weight:700}
+.lc-court-bar{background:rgba(14,165,233,.1);border-bottom:1px solid rgba(14,165,233,.2);
+  padding:5px 14px;font-size:12px;font-weight:700;color:var(--ac);text-align:center}
 .lc-round-tag{font-size:11px;color:var(--or);font-weight:600}
 
 /* ══ BẢNG ĐẤU (SCHEDULE) ══ */
@@ -897,22 +899,27 @@ function renderLive(){
     const mInfo=_M.find(m=>String(m[3]||'')===code&&String(m[2]||'')===bang)||null;
     const court=mInfo?String(mInfo[8]||''):'';
     const round=mInfo?String(mInfo[9]||''):'';
+    // FIX: Tên đội xuống hàng tại dấu " - " (phân cách 2 VĐV)
+    const fmtTeam=t=>esc(t).replace(' - ','<br>');
+    // FIX: Bỏ prefix "Game " trong label game (data="Game 1" → hiện "Game 1" không phải "Game Game 1")
+    const gameLabel=game?game.replace(/^Game\s+/i,'').trim():'';
     return {key, html:`<div class="lc-hdr">
         <div class="lc-live-badge"><div class="dot"></div>LIVE</div>
         <div class="lc-meta">${esc(bang||nd)}${round?' · '+esc(round):''}</div>
       </div>
+      ${court?`<div class="lc-court-bar">🏸 ${esc(court)}</div>`:''}
       <div class="lc-body"><div class="lc-scoreboard">
-        <div class="lc-team"><div class="lc-team-name">${esc(tA)}</div>
-          <div class="lc-serve">${serve==='A'?'🟡 Giao bóng':''}</div></div>
+        <div class="lc-team"><div class="lc-team-name">${fmtTeam(tA)}</div>
+          <div class="lc-serve">${serve==='A'?'🟡 Giao':''}</div></div>
         <div class="lc-score-wrap"><div>
           <span class="lc-num${aWin?' win':''}">${sA}</span>
           <span class="lc-dash">–</span>
           <span class="lc-num${bWin?' win':''}">${sB}</span>
-        </div>${game?`<div class="lc-game">Game ${esc(game)}</div>`:''}</div>
-        <div class="lc-team"><div class="lc-team-name">${esc(tB)}</div>
-          <div class="lc-serve">${serve==='B'?'🟡 Giao bóng':''}</div></div>
+        </div>${gameLabel?`<div class="lc-game">Game ${esc(gameLabel)}</div>`:''}</div>
+        <div class="lc-team"><div class="lc-team-name">${fmtTeam(tB)}</div>
+          <div class="lc-serve">${serve==='B'?'🟡 Giao':''}</div></div>
       </div></div>
-      <div class="lc-ftr"><div class="lc-court">${court?'🏸 '+esc(court):''}</div>
+      <div class="lc-ftr">
         <div class="lc-round-tag">${esc(round)}</div></div>`};
   };
 
