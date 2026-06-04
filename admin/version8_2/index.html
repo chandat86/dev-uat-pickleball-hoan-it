@@ -4,7 +4,7 @@
 <!-- Pickleball v67 2026-06-03: v6 FIX NGUỒN DUY NHẤT — buildDkFromResults/isMatchDone/getFinalScore/_syncResultCache/_buildLiveFromRows đều dùng key 4 trường "TênGiải|NộiDung|Bảng|MãTrận"; bỏ fallback Matches col[5/6] trong getFinalScore; bỏ giaiId duplicate trong _dK; bỏ fallback giaiId trong isMatchDone — badge Hoàn thành/Chưa đấu/Đang đấu giờ chính xác 100% từ KetQua | v66 2026-06-03: FIX v32 referee bugs — assignCourtToRef/assignRef/atrAssignDirect không xóa noidung cũ; _matchAllowed normalize dấu; renderMatchGrid hiển thị khi có trận phân tên | v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Admin v8.5 — Referee Pickleball / DA NANG ®</title>
+<title>Admin v8.441 — Referee Pickleball / DA NANG ®</title>
 <style>
 /* ═══════════════════════════════════════════════════════
    Pickleball Admin — Mobile-First Professional UI
@@ -1029,6 +1029,13 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
       </div>
       <div class="lerr" id="lerr"></div>
       <div class="ldbg" id="ldbg"></div>
+      <!-- Nút xóa cache — hiện khi kết nối chậm hoặc lỗi -->
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,.06);text-align:center">
+        <button onclick="clearAllAdminCache()" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);color:#f87171;border-radius:8px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s" title="Xóa toàn bộ cache và thử lại nếu đăng nhập chậm">
+          🗑 Xóa cache & thử lại
+        </button>
+        <div style="font-size:10px;color:var(--tx4);margin-top:5px">Dùng khi đăng nhập chậm hoặc bị lỗi</div>
+      </div>
     </div>
     <div class="rb">
       <strong style="color:var(--gn)">🏓 Trọng tài đăng nhập ở đâu?</strong><br>
@@ -2824,8 +2831,11 @@ window.onload = () => {
       more.style.display = 'none';
   });
 
+  // ── Startup: kiểm tra build version + cache age ngầm ──
+  _checkBuildVersion();   // Clear cache nếu deploy GAS mới
+  _checkLsCacheAge();     // Clear localStorage data nếu quá cũ
+
   // ── Khôi phục URL + code đã lưu vào form ──
-  // Ưu tiên: localStorage → DEFAULT_GAS_URL (không cần copy paste mỗi lần)
   const savedUrl  = localStorage.getItem('pb_gs_url') || DEFAULT_GAS_URL;
   const savedCode = localStorage.getItem('pb_adm_code') || '';
   const urlEl  = document.getElementById('gs-url');
@@ -3056,6 +3066,7 @@ async function testGasUrl() {
 }
 
 function showApp() {
+  _startBgCacheWatcher(); // Bắt đầu kiểm tra cache ngầm mỗi 60s
   document.getElementById('ls').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   document.getElementById('sb-usr').textContent = NAME;
@@ -3300,15 +3311,140 @@ function startLivePolling() {
   }, 3000); // Poll mỗi 3s (giảm từ 8s) để phát hiện kết quả nhanh hơn
 }
 
+// ══════════════════════════════════════════════════════════════
+//  BACKGROUND CACHE MANAGER — tự động, người dùng không thấy
+// ══════════════════════════════════════════════════════════════
+
+// Xóa cache ngầm — không reload, không thông báo
+function _silentClearCache(reason) {
+  console.log('[CACHE] Silent clear:', reason || 'no reason');
+  try {
+    // Xóa tất cả localStorage data (giữ URL + code + build key)
+    const keep = {
+      'pb_gs_url':    localStorage.getItem('pb_gs_url'),
+      'pb_adm_code':  localStorage.getItem('pb_adm_code'),
+      [LS_BUILD_KEY]: APP_BUILD, // Cập nhật build key sau khi clear
+    };
+    const toClear = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('pb_adm') || k.startsWith('pb_bk') || k.startsWith('pb_bye'))) {
+        if (!keep[k]) toClear.push(k);
+      }
+    }
+    toClear.forEach(k => localStorage.removeItem(k));
+    // Restore keep values
+    Object.entries(keep).forEach(([k, v]) => { if (v) localStorage.setItem(k, v); });
+  } catch(e) { console.warn('[CACHE] Clear error:', e); }
+
+  // Xóa in-memory cache
+  try { Object.keys(_cache).forEach(k => delete _cache[k]); _cacheVer++; } catch(e) {}
+  try { sessionStorage.removeItem('pb_bk_state'); } catch(e) {}
+
+  // Reset bracket state
+  _bkCurrentTree = null;
+  _bkApplied     = false;
+  _bkOverrides   = {};
+  _bkLastVersion = 0;
+}
+
+// Chạy khi page load — kiểm tra build version, tự clear nếu deploy mới
+function _checkBuildVersion() {
+  try {
+    const savedBuild = localStorage.getItem(LS_BUILD_KEY);
+    if (savedBuild && savedBuild !== APP_BUILD) {
+      console.log('[CACHE] Build changed:', savedBuild, '→', APP_BUILD, '— clearing stale cache');
+      _silentClearCache('build_changed');
+      localStorage.setItem(LS_BUILD_KEY, APP_BUILD);
+    } else if (!savedBuild) {
+      localStorage.setItem(LS_BUILD_KEY, APP_BUILD);
+    }
+  } catch(e) {}
+}
+
+// Kiểm tra localStorage cache age — xóa nếu quá cũ
+function _checkLsCacheAge() {
+  try {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('pb_adm_M') || k.startsWith('pb_adm_T') || k.startsWith('pb_adm_R'))) {
+        keys.push(k);
+      }
+    }
+    if (!keys.length) return;
+    // Kiểm tra timestamp từ _M (dùng key pb_adm_cache_ts)
+    const tsKey = 'pb_adm_cache_ts';
+    const ts = parseInt(localStorage.getItem(tsKey) || '0');
+    if (ts && Date.now() - ts > CACHE_LS_TTL) {
+      console.log('[CACHE] LS data expired after', Math.round((Date.now()-ts)/1000), 's — purging');
+      keys.forEach(k => localStorage.removeItem(k));
+      localStorage.removeItem(tsKey);
+    }
+  } catch(e) {}
+}
+
+// Cập nhật timestamp cache khi lưu data mới
+function _touchCacheTs() {
+  try { localStorage.setItem('pb_adm_cache_ts', Date.now()); } catch(e) {}
+}
+
+// Background watcher — chạy mỗi 60s khi đã đăng nhập
+let _bgCacheTimer = null;
+function _startBgCacheWatcher() {
+  if (_bgCacheTimer) clearInterval(_bgCacheTimer);
+  _bgCacheTimer = setInterval(async () => {
+    if (!GS || !CODE) return;
+    try {
+      // Re-validate session ngầm
+      const url = new URL(GS);
+      url.searchParams.set('action', 'validate');
+      url.searchParams.set('code', CODE);
+      url.searchParams.set('device', 'AdminPanel');
+      url.searchParams.set('_t', Date.now());
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 8000);
+      const r = await fetch(url.toString(), { signal: ctrl.signal, cache: 'no-store' });
+      clearTimeout(tid);
+      const d = await r.json();
+      if (!d.valid) {
+        // Session không còn hợp lệ → clear và về login
+        console.log('[CACHE] Session invalid — clearing and reloading');
+        _silentClearCache('session_invalid');
+        location.reload();
+        return;
+      }
+      // Session OK — check xem có thay đổi phân quyền không
+      if (d.giai && MY_GIAI && d.giai !== MY_GIAI) {
+        console.log('[CACHE] Permission changed — clearing match cache');
+        _silentClearCache('permission_changed');
+        MY_GIAI = d.giai;
+        MY_GIAI_LIST = MY_GIAI.split(',').map(g=>g.trim()).filter(Boolean);
+        await loadMatchesCache(GS, true); // reload ngầm
+      }
+    } catch(e) {
+      // Timeout/network error — bỏ qua, không crash
+      console.log('[CACHE BG] validate skip:', e.message);
+    }
+  }, 60000); // mỗi 60s
+}
+
+function _stopBgCacheWatcher() {
+  if (_bgCacheTimer) { clearInterval(_bgCacheTimer); _bgCacheTimer = null; }
+}
+
 function doLogout() {
-  localStorage.removeItem('pb_adm3');
-  localStorage.removeItem('pb_adm_code'); // xóa code khi đăng xuất (bảo mật)
-  // Giữ lại pb_gs_url để không phải nhập lại URL lần sau
-  clearInterval(_dtimer); clearInterval(_rtimer);
-  clearInterval(_liveTimer); clearInterval(_liveTimer2);
-  clearInterval(_resultsTimer); _resultsTimer = null;
-  _bkStopAutoPolling();
+  _stopBgCacheWatcher();
+  _silentClearCache('logout');
   location.reload();
+}
+
+// Xóa toàn bộ cache admin — dùng khi đăng nhập chậm hoặc lỗi cache
+function clearAllAdminCache() {
+  _silentClearCache('manual_user_clear');
+  const lerr = document.getElementById('lerr');
+  if (lerr) { lerr.style.color = '#4ade80'; lerr.textContent = '✅ Đã xóa cache · Đang tải lại...'; }
+  setTimeout(() => location.reload(), 600);
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -3316,7 +3452,11 @@ function doLogout() {
 // ════════════════════════════════════════════════════════════════
 const _cache = {}; // { key: { ts, data, ver } }
 let   _cacheVer = 0; // Tăng mỗi khi invalidate matches → cache cũ tự vô hiệu
-const CACHE_TTL = 300000; // 300s (5 phút) — giảm số lần hit GAS; force refresh khi cần
+// v37: Cache thông minh — tự expire, tự clear khi stale
+const CACHE_TTL       = 60000;  // 60s — giảm từ 5p xuống 1p, stale data ít hơn
+const CACHE_LS_TTL    = 300000; // 5p — localStorage cache expire (matches, tournaments)
+const APP_BUILD       = 'v38_' + '20260604'; // Tăng mỗi lần deploy GAS mới → tự clear cache cũ
+const LS_BUILD_KEY    = 'pb_adm_build';
 
 function cacheGet(key) {
   const c = _cache[key];
@@ -3539,6 +3679,7 @@ async function prefetchAll() {
       // GAS sẽ overwrite _M ngay sau khi load → không stale lâu
       if (_M.length) {
         try { localStorage.setItem(_lsMKey, JSON.stringify(_M)); } catch(e) {}
+      _touchCacheTs(); // Update cache timestamp
       }
       // Lưu _R (KetQua rows) cho buildDkFromResults
       const cachedR2 = cacheGet('results_' + (ROLE==='manager'?MY_GIAI:''));
