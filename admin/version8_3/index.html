@@ -9354,6 +9354,13 @@ function _bkBuildTree(seeds, bangs, koMatches, bangDone) {
     if (ov) {
       const ovName = side === 'A' ? ov.teamA : ov.teamB;
       if (ovName) return ovName;
+      // FIX v73: seedCode lưu khi bảng chưa xong → ov.teamA rỗng.
+      // Sau khi bảng hoàn thành, re-resolve seedCode để lấy tên thực tế.
+      const sc = side === 'A' ? ov.seedCodeA : ov.seedCodeB;
+      if (sc) {
+        const r = _bkLookupSeedCode(sc);
+        if (r && r.team) return r.team;
+      }
     }
     const sheetM = koByCode[code];
     return sheetM ? String(side === 'A' ? sheetM[4]||'' : sheetM[7]||'') : '';
@@ -9392,6 +9399,10 @@ function _bkBuildTree(seeds, bangs, koMatches, bangDone) {
       // Rule BYE (mặc định): auto-advance
       if (bye.byeA && !ov.byeAOverridden) return _resolvedTeam(code, 'B') || '';
       if (bye.byeB && !ov.byeBOverridden) return _resolvedTeam(code, 'A') || '';
+      // FIX v73: BYE slot đã được gán đội thực (byeAOverridden/byeBOverridden) →
+      // đội được gán tự động advance vào vòng sau (họ không có đối thủ thực).
+      if (bye.byeA && ov.byeAOverridden) return _resolvedTeam(code, 'A') || '';
+      if (bye.byeB && ov.byeBOverridden) return _resolvedTeam(code, 'B') || '';
     }
     return '';
   };
@@ -9540,21 +9551,28 @@ function _bkApplyOverrides(tree) {
     round.matches.forEach(m => {
       const ov = _bkOverrides[m.code];
       if (!ov) return;
-      if (ov.teamA !== undefined) m.teamA = ov.teamA;
-      if (ov.teamB !== undefined) m.teamB = ov.teamB;
+      // FIX v73: Nếu seedCode có nhưng teamA rỗng (bảng chưa xong lúc lưu override),
+      // re-resolve seedCode → tên thực tế ngay bây giờ (sau khi bảng đã xong).
+      const _resSC = (sc, curTeam) => {
+        if (!sc || curTeam) return curTeam;
+        const r = _bkLookupSeedCode(sc);
+        return (r && r.team) ? r.team : curTeam;
+      };
+      if (ov.teamA !== undefined) m.teamA = _resSC(ov.seedCodeA, ov.teamA);
+      if (ov.teamB !== undefined) m.teamB = _resSC(ov.seedCodeB, ov.teamB);
       // BYE bị thay bằng đội thực → xóa flag isBye để render bình thường
       if (ov.byeAOverridden) { m.isByeA = false; }
       if (ov.byeBOverridden) { m.isByeB = false; }
       // v8: Admin chủ động gán BYE cho 1 slot → set isBye flag + cập nhật seedA label thành "BYE"
       if (ov.isByeA === true && !ov.byeAOverridden) { m.isByeA = true; m.teamA = ''; m.seedA = 'BYE'; }
       if (ov.isByeB === true && !ov.byeBOverridden) { m.isByeB = true; m.teamB = ''; m.seedB = 'BYE'; }
-      // Cập nhật seed label để pill hiển thị đúng:
-      // - Có seedCode (ví dụ "1A", "2B") → dùng mã đó
-      // - Không có seedCode nhưng có teamA (nhập tên trực tiếp) → xóa seed label (pill hiện p-num)
+      // FIX v73b: seedCode tồn tại → slot không phải BYE (kể cả khi byeAOverridden=false)
+      if (ov.seedCodeA && !ov.isByeA) { m.isByeA = false; }
+      if (ov.seedCodeB && !ov.isByeB) { m.isByeB = false; }
+      // Cập nhật seed label để pill hiển thị đúng
       if (ov.seedCodeA) {
         m.seedA = _bkSeedCodeToLabel(ov.seedCodeA) || m.seedA;
       } else if (ov.teamA !== undefined && !ov.isByeA) {
-        // Nhập tên trực tiếp → bỏ seed label gốc, pill chỉ hiện màu neutral
         m.seedA = '';
       }
       if (ov.seedCodeB) {
@@ -10974,10 +10992,12 @@ function bkSaveEditNew(code) {
       ov[`team${side}`] = t; ov[`seedCode${side}`] = '';
       ov[`isBye${side}`] = false; ov[`bye${side}Overridden`] = !!t;
     } else {
+      // FIX v73b: Luôn set byeXOverridden=true khi chọn seedCode (VD: "2I"),
+      // kể cả khi bảng chưa xong (team rỗng). isBye phải được xóa ngay.
       const r = _bkLookupSeedCode(val);
       const t = (r && r.team) ? r.team : ((inp?.value||'').trim());
       ov[`team${side}`] = t; ov[`seedCode${side}`] = val;
-      ov[`isBye${side}`] = false; ov[`bye${side}Overridden`] = !!t;
+      ov[`isBye${side}`] = false; ov[`bye${side}Overridden`] = true;
     }
   };
   applySlot(valA, inpA, 'A');
