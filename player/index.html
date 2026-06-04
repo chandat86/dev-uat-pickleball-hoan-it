@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>Pickleball v3.24— Xem Giải Đấu</title>
+<title>Pickleball v3.25— Xem Giải Đấu</title>
 <style>
 /* system font - no import needed */
 :root{
@@ -1439,8 +1439,12 @@ function _bkRenderFromSnapshot(nd,snap,wrap){
       if(!sc||curTeam)return curTeam;
       return _bkLookupSeedCode(nd,sc)||curTeam;
     };
-    if(ov.teamA!==undefined)m.teamA=_resSC(ov.seedCodeA,ov.teamA);
-    if(ov.teamB!==undefined)m.teamB=_resSC(ov.seedCodeB,ov.teamB);
+    // FIX v3.1: Chỉ overwrite teamA/B nếu override cho giá trị tốt hơn snapshot.
+    // ov.teamA='' không overwrite m.teamA đã có từ snapshot (tránh xóa tên đội đúng).
+    const resolvedA=_resSC(ov.seedCodeA,ov.teamA);
+    const resolvedB=_resSC(ov.seedCodeB,ov.teamB);
+    if(ov.teamA!==undefined){if(resolvedA)m.teamA=resolvedA;else if(!ov.seedCodeA&&ov.teamA)m.teamA=ov.teamA;}
+    if(ov.teamB!==undefined){if(resolvedB)m.teamB=resolvedB;else if(!ov.seedCodeB&&ov.teamB)m.teamB=ov.teamB;}
     if(ov.isByeA===true&&!ov.byeAOverridden){m.isByeA=true;m.teamA='';m.seedA='BYE';}
     if(ov.isByeB===true&&!ov.byeBOverridden){m.isByeB=true;m.teamB='';m.seedB='BYE';}
     // FIX v3: seedCode tồn tại → slot này không phải BYE nữa (kể cả khi byeAOverridden=false)
@@ -1451,6 +1455,31 @@ function _bkRenderFromSnapshot(nd,snap,wrap){
     if(ov.seedCodeA)m.seedA=ov.seedCodeA;
     if(ov.seedCodeB)m.seedB=ov.seedCodeB;
   });});
+
+  // FIX v3.1: Patch round-0 teamA/B rỗng từ snapshot cũ (lưu trước khi bảng xong)
+  // Dùng _bkCalcSeeds() hiện tại để lấy tên đội thực tế theo seedA label
+  const {seeds:_seeds, bangs:_bangs, bangDone:_bangDone} = _bkCalcSeeds(nd);
+  const _lookupByLabel=(label)=>{
+    if(!label)return'';
+    const mc=(label||'').trim().match(/^([1-4])([A-Z])$/i);
+    if(!mc)return'';
+    const rank=parseInt(mc[1]),bangChar=mc[2].toUpperCase();
+    const bangKey=_bangs.find(b=>b===bangChar||b.toUpperCase()===bangChar||b.replace(/^Bảng\s+/i,'').trim().toUpperCase()===bangChar);
+    if(!bangKey||!_bangDone?.[bangKey])return'';
+    const entry=(_seeds[bangKey]||[]).find(x=>x.rank===rank);
+    return entry?entry.team:'';
+  };
+  // Chỉ patch round-0 (fromFin lớn nhất = vòng đầu tiên)
+  if(roundMatches.length){
+    const maxFromFin=Math.max(...roundMatches.filter(r=>r.fromFin>=0).map(r=>r.fromFin));
+    const round0=roundMatches.find(r=>r.fromFin===maxFromFin);
+    if(round0){
+      round0.matches.forEach(m=>{
+        if(!m.teamA&&m.seedA&&!m.isByeA){const t=_lookupByLabel(m.seedA);if(t)m.teamA=t;}
+        if(!m.teamB&&m.seedB&&!m.isByeB){const t=_lookupByLabel(m.seedB);if(t)m.teamB=t;}
+      });
+    }
+  }
 
   // FIX v3: Sau khi merge overrides, propagate winner của các trận BYE-auto-advance
   // vào vòng sau (round-0 BYE slots mà đội thực đã được gán → advance tự động)
