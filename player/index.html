@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>Pickleball v3.22— Xem Giải Đấu</title>
+<title>Pickleball v6— Xem Giải Đấu</title>
 <style>
 /* system font - no import needed */
 :root{
@@ -417,9 +417,12 @@ let GS=GAS_URL, USER_NAME='', USER_CODE='', USER_GIAI='', USER_ND='';
 let _M=[], _R=[], _L=[], _T=null, _giaiName='';
 let _curTab='live', _curNd='', _allNds=[];
 let _liveTimer=null;
-let _permTimer=null; // Timer kiểm tra phân quyền
-const REFRESH_SEC=12;
-const PERM_CHECK_SEC=30; // Kiểm tra phân quyền mỗi 30s
+let _permTimer=null;
+let _hardReloadTimer=null; // v3: Hard reload toàn bộ cache mỗi N phút
+const REFRESH_SEC=8;          // Cập nhật live/kết quả mỗi 8s
+const PERM_CHECK_SEC=20;      // Kiểm tra phân quyền mỗi 20s
+const HARD_RELOAD_MIN=3;      // v3: Clear cache & full reload mỗi 3 phút
+const DATA_VER_KEY='pb_pdata_ver'; // v3: version key để detect admin change
 
 // ══ UTILS ══
 const $=id=>document.getElementById(id);
@@ -431,7 +434,11 @@ function toast(msg,dur=2500){
 }
 function setUpdateTime(){
   const d=new Date();
-  $('update-time').textContent='Cập nhật: '+d.toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const t=d.toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const el=$('update-time');
+  if(el)el.textContent='Cập nhật: '+t;
+  // v3: Lưu timestamp để tính stale
+  try{sessionStorage.setItem('pb_last_upd',Date.now());}catch(e){}
 }
 
 // ══ API ══
@@ -488,6 +495,8 @@ async function doLogin(){
       btn.disabled=false;btn.textContent='Đăng nhập →';return;
     }
     localStorage.setItem('pb_player_v6',JSON.stringify({u:GS,c:USER_CODE,n:USER_NAME,g:USER_GIAI,nd:USER_ND}));
+    // v3: Clear mọi cache dữ liệu khi đăng nhập mới — đảm bảo không dùng data cũ
+    _clearDataCache();
     startApp();
   }catch(e){showErr('Lỗi: '+e.message);btn.disabled=false;btn.textContent='Đăng nhập →';}
 }
@@ -516,13 +525,36 @@ async function startApp(){
 function startRefresh(){
   stopRefresh();
   _liveTimer=setInterval(()=>silentRefresh(),REFRESH_SEC*1000);
-  // Kiểm tra phân quyền định kỳ - tự động cập nhật giải đấu nếu admin đổi
   _permTimer=setInterval(()=>checkPermission(),PERM_CHECK_SEC*1000);
+  // v3: Hard reload toàn bộ cache mỗi HARD_RELOAD_MIN phút
+  _hardReloadTimer=setInterval(()=>_hardReload(),HARD_RELOAD_MIN*60*1000);
 }
 function stopRefresh(){
   if(_liveTimer){clearInterval(_liveTimer);_liveTimer=null;}
   if(_permTimer){clearInterval(_permTimer);_permTimer=null;}
+  if(_hardReloadTimer){clearInterval(_hardReloadTimer);_hardReloadTimer=null;}
 }
+
+// v3: Xóa toàn bộ cache dữ liệu trận đấu (không xóa session login)
+function _clearDataCache(){
+  _M=[];_R=[];_L=[];_T=null;_giaiName='';_curNd='';_allNds=[];
+  // Xóa version tracking để force fresh fetch
+  try{ sessionStorage.removeItem(DATA_VER_KEY); }catch(e){}
+  console.log('[v3] Data cache cleared');
+}
+
+// v3: Hard reload định kỳ — fetch lại toàn bộ từ server, cập nhật cây thi đấu & VĐV
+async function _hardReload(){
+  if(!GS||!USER_CODE)return;
+  console.log('[v3] Hard reload triggered');
+  _clearDataCache();
+  try{
+    await loadAll();
+    renderCurrentTab();
+    console.log('[v3] Hard reload done — matches:',_M.length);
+  }catch(e){ console.warn('[v3] Hard reload error:',e); }
+}
+
 async function silentRefresh(){try{await loadAll();renderCurrentTab();}catch(e){}}
 
 // ── Tự động kiểm tra phân quyền & cập nhật giải đấu nếu thay đổi ──
@@ -537,13 +569,13 @@ async function checkPermission(){
     const newNd=(d.noidung||'').trim();
     const oldGiai=(USER_GIAI||'').trim();
     const oldNd=(USER_ND||'').trim();
-    // Nếu phân quyền thay đổi HOẶC lần đầu chưa có giải → cập nhật và reload
+    // v3: Luôn cập nhật tên nếu thay đổi
+    if(d.name)USER_NAME=d.name;
+    // Nếu phân quyền thay đổi HOẶC lần đầu chưa có giải → clear cache + reload
     if(newGiai!==oldGiai||newNd!==oldNd||!oldGiai){
-      USER_NAME=d.name||'';USER_GIAI=newGiai;USER_ND=newNd;
+      USER_GIAI=newGiai;USER_ND=newNd;
       localStorage.setItem('pb_player_v6',JSON.stringify({u:GS,c:USER_CODE,n:USER_NAME,g:USER_GIAI,nd:USER_ND}));
-      // Reset state và load lại data giải mới
-      _T=null;_giaiName='';_curNd='';_allNds=[];
-      _M=[];_R=[];_L=[];
+      _clearDataCache();
       await loadAll();
       renderCurrentTab();
       toast('🔄 Giải đấu đã được cập nhật!',3000);
@@ -1095,7 +1127,8 @@ function _bkBuildAndRenderTree(nd,wrap){
 
   const roundName=(ff)=>{if(ff===0)return'Chung kết';if(ff===1)return'Bán kết';if(ff===2)return'Tứ kết';return'Vòng '+Math.pow(2,ff+1);};
   const roundCls=(ff)=>{if(ff===0)return'bk-ck';if(ff===1)return'bk-bk';if(ff===2)return'bk-tk';return'bk-vg';};
-  const prefix=(ff,nM)=>{if(ff===0)return ndPfx+'CK';if(ff===1)return ndPfx+'BK';if(ff===2)return ndPfx+'TK';return ndPfx+'V'+Math.pow(2,ff+1);};
+  // v3: Không dùng ndPfx — dùng cùng format với admin (CK, BK, TK, V16, V32...)
+  const prefix=(ff,nM)=>{if(ff===0)return'CK';if(ff===1)return'BK';if(ff===2)return'TK';return'V'+Math.pow(2,ff+1);};
   const rnArr=['Nhất','Nhì','Ba','Tư'];
   const bangShort=(b)=>b?b.replace(/^Bảng\s+/i,'').trim():b;
 
@@ -1130,8 +1163,12 @@ function _bkBuildAndRenderTree(nd,wrap){
     const nM=cap/Math.pow(2,r+1);
     const pfx=prefix(fromFin,nM);
     const matches=[];
+    // v3: Zero-pad khi nM>=10 để sort đúng (V3201..V3216 thay vì V321..V3216)
+    const padLen=nM>9?String(nM).length:0;
     for(let i=0;i<nM;i++){
-      const code=nM===1?pfx:pfx+(i+1);
+      const idx=i+1;
+      const idxStr=padLen>0?String(idx).padStart(padLen,'0'):String(idx);
+      const code=nM===1?pfx:pfx+idxStr;
       if(r===0){
         const slotT=i*2+1,slotB=i*2+2;
         const sT=slotMap[slotT]||null,sB2=slotMap[slotB]||null;
@@ -1143,9 +1180,12 @@ function _bkBuildAndRenderTree(nd,wrap){
         matches.push({code,seedA:labelT,seedB:labelB,teamA,teamB,isByeA:byeT,isByeB:byeB,fromFin});
         if(byeT||byeB)_byeMap[code]={byeA:byeT,byeB:byeB};
       }else{
-        const prevPfx=prefix(fromFin+1,nM*2);
-        const codeA=nM*2===1?prevPfx:prevPfx+(i*2+1);
-        const codeB=nM*2===1?prevPfx:prevPfx+(i*2+2);
+        const prevNM=nM*2;
+        const prevPfx=prefix(fromFin+1,prevNM);
+        const prevPadLen=prevNM>9?String(prevNM).length:0;
+        const _zp2=(n,tot)=>tot>9?String(n).padStart(String(tot).length,'0'):String(n);
+        const codeA=prevNM===1?prevPfx:prevPfx+_zp2(i*2+1,prevNM);
+        const codeB=prevNM===1?prevPfx:prevPfx+_zp2(i*2+2,prevNM);
         // Auto-advance from BYE
         let tA=getWinnerFromKo(codeA),tB=getWinnerFromKo(codeB);
         // BYE auto-advance
@@ -1161,20 +1201,22 @@ function _bkBuildAndRenderTree(nd,wrap){
   // Hạng 3
   if(rounds2>=2){
     const bkCount=cap/4;
-    const bk1=bkCount===1?ndPfx+'BK':ndPfx+'BK1';
-    const bk2=bkCount===1?ndPfx+'BK':ndPfx+'BK2';
-    roundMatches.push({name:'Hạng 3',cls:'bk-h3',fromFin:-1,matches:[{code:ndPfx+'H3',seedA:`Thua ${bk1}`,seedB:`Thua ${bk2}`,teamA:getLoserFromKo(bk1),teamB:getLoserFromKo(bk2)}]});
+    const bk1=bkCount===1?'BK':'BK1';
+    const bk2=bkCount===1?'BK':'BK2';
+    roundMatches.push({name:'Hạng 3',cls:'bk-h3',fromFin:-1,matches:[{code:'H3',seedA:`Thua ${bk1}`,seedB:`Thua ${bk2}`,teamA:getLoserFromKo(bk1),teamB:getLoserFromKo(bk2)}]});
   }
 
   // ── Render helpers ──
   const pillCls=(seedStr)=>{
     if(!seedStr)return'p-num';if(seedStr.startsWith('Thắng')||seedStr==='W')return'p-w';
     if(seedStr.startsWith('BYE'))return'p-bye';
+    const shortM=seedStr.match(/^[1-4]([A-Z])$/i);if(shortM)return'p-'+shortM[1].toUpperCase();
     const bangM2=seedStr.match(/Bảng\s+([A-Z])/i);if(bangM2)return'p-'+bangM2[1].toUpperCase();
     return'p-num';
   };
   const pillLabel=(seedStr)=>{
     if(!seedStr)return'?';if(seedStr.startsWith('Thắng'))return'W';if(seedStr==='BYE')return'BYE';
+    if(/^[1-4][A-Z]$/i.test(seedStr.trim()))return seedStr.trim().toUpperCase();
     const rank=seedStr.includes('Nhất')?1:seedStr.includes('Nhì')?2:seedStr.includes('Ba')?3:seedStr.includes('Tư')?4:0;
     const bangM2=seedStr.match(/Bảng\s+([A-Z])/i);const bang2=bangM2?bangM2[1].toUpperCase():'';
     if(rank&&bang2)return rank+bang2;return'?';
@@ -1308,6 +1350,8 @@ async function autoLoginFromCache(){
     console.log('[AUTO-LOGIN] USER_GIAI:', USER_GIAI);
     if(!USER_GIAI.trim())return false; // Chưa có phân quyền → yêu cầu đăng nhập lại
     localStorage.setItem('pb_player_v6',JSON.stringify({u:GS,c:USER_CODE,n:USER_NAME,g:USER_GIAI,nd:USER_ND}));
+    // v3: Clear data cache sau khi re-validate để luôn fetch fresh
+    _clearDataCache();
     return true;
   }catch(e){return false;}
 }
