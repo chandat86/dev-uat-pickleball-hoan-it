@@ -4,7 +4,7 @@
 <!-- Pickleball v69 2026-06-04: FIX confirm() trong bkApplyAndSave bị browser block → return sớm không save BracketTree; thay bằng toast cảnh báo tiếp tục luôn | v68 2026-06-04: FIX saveBracketTree bị bỏ qua khi Apply lần 2 (toCreate=0, toUpdate=0 → return sớm trước khi save GSheet) | v67 2026-06-03: v6 FIX NGUỒN DUY NHẤT — buildDkFromResults/isMatchDone/getFinalScore/_syncResultCache/_buildLiveFromRows đều dùng key 4 trường "TênGiải|NộiDung|Bảng|MãTrận"; bỏ fallback Matches col[5/6] trong getFinalScore; bỏ giaiId duplicate trong _dK; bỏ fallback giaiId trong isMatchDone — badge Hoàn thành/Chưa đấu/Đang đấu giờ chính xác 100% từ KetQua | v66 2026-06-03: FIX v32 referee bugs — assignCourtToRef/assignRef/atrAssignDirect không xóa noidung cũ; _matchAllowed normalize dấu; renderMatchGrid hiển thị khi có trận phân tên | v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Admin v8.233 — Referee Pickleball / DA NANG ®</title>
+<title>Admin v8.212 — Referee Pickleball / DA NANG ®</title>
 <style>
 /* ═══════════════════════════════════════════════════════
    Pickleball Admin — Mobile-First Professional UI
@@ -12165,15 +12165,24 @@ async function bkApplyAndSave() {
           };
           const totalM = treeNow.rounds.reduce((s,r)=>s+(r.matches?.length||0),0);
           console.log('[BK TREE] Saving from bkApplyAndSave:', giaiName2, _bkNd, totalM, 'matches');
+          console.log('[BK TREE] POST payload — action:saveBracketTree giai:', giaiName2, 'nd:', _bkNd, 'rounds:', treeToSave.rounds?.length, 'CODE:', CODE?'ok':'MISSING');
           const ds = await gPost({action:'saveBracketTree', adminCode:CODE, giai:giaiName2, nd:_bkNd, tree:treeToSave}, 45000);
-          if (ds.ok) {
+          console.log('[BK TREE] GAS response RAW:', JSON.stringify(ds));
+          if (ds.ok && ds.saved !== undefined) {
             _bkLastVersion = ds.version || Date.now();
             _bkApplied = true; // Khóa cây
             console.log('[BK TREE] ✓ Saved from bkApplyAndSave v', _bkLastVersion, 'saved:', ds.saved);
             toast('☁️ Cây đã đồng bộ GSheet (' + totalM + ' trận)', 'ok', 2500);
-          } else {
-            console.error('[BK TREE] ✗ Save failed:', ds.reason);
+          } else if (ds.ok && ds.error) {
+            // GAS cũ trả về {ok:true, error:'Unknown action'} — chưa deploy đúng
+            console.error('[BK TREE] ✗ GAS chưa deploy đúng — Unknown action:', ds.error);
+            toast('⚠️ GAS chưa deploy: ' + ds.error, 'er', 5000);
+          } else if (!ds.ok) {
+            console.error('[BK TREE] ✗ Save failed:', ds.reason, ds);
             toast('⚠️ Chưa đồng bộ GSheet: ' + (ds.reason||'lỗi'), 'er', 4000);
+          } else {
+            console.warn('[BK TREE] Response không rõ:', ds);
+            toast('⚠️ Phản hồi GAS không rõ — xem Console', 'er', 4000);
           }
         } catch(eSave) {
           console.error('[BK TREE] Save error:', eSave);
