@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>Pickleball v3.34— Xem Giải Đấu</title>
+<title>Pickleball v4— Xem Giải Đấu</title>
 <style>
 /* system font - no import needed */
 :root{
@@ -109,7 +109,7 @@ body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100vh
   padding:8px 14px;font-size:11px;color:#fca5a5;font-family:monospace;line-height:1.6}
 
 /* ── MAIN ── */
-#main{padding:12px 14px;max-width:1100px;margin:0 auto}
+#main{padding:8px 10px;max-width:1100px;margin:0 auto;box-sizing:border-box;overflow-x:hidden}
 .page{display:none}.page.on{display:block}
 
 /* ── SPIN ── */
@@ -178,10 +178,10 @@ body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100vh
 .match-row:hover{background:rgba(255,255,255,.03)}
 .match-row.live{background:rgba(245,158,11,.05);border-left:3px solid var(--or)}
 .match-row.done{opacity:.85}
-.mr-team{font-size:13px;font-weight:600;color:var(--tx);line-height:1.3}
+.mr-team{font-size:12px;font-weight:600;color:var(--tx);line-height:1.4;word-break:break-word;min-width:0}
 .mr-team.right{text-align:right}
 .mr-team.winner{color:var(--gn);font-weight:800}
-.mr-mid{text-align:center;min-width:70px}
+.mr-mid{text-align:center;min-width:64px;max-width:90px;flex-shrink:0}
 .mr-score{font-family:var(--fh);font-size:22px;font-weight:900;color:var(--tx);letter-spacing:1px;line-height:1}
 .mr-score .w{color:var(--gn)}
 .mr-vs{font-size:11px;font-weight:700;color:var(--tx3);letter-spacing:1px}
@@ -203,11 +203,11 @@ body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100vh
 .bxh-arrow.open{transform:rotate(180deg)}
 .bxh-body{display:none}
 .bxh-body.open{display:block}
-.bxh-tbl{width:100%;border-collapse:collapse;font-size:13px}
+.bxh-tbl{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
 .bxh-tbl th{padding:7px 10px;font-size:10px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;
   color:var(--tx3);text-align:center;background:rgba(0,0,0,.2);border-bottom:1px solid var(--bdr)}
 .bxh-tbl th:first-child,.bxh-tbl td:first-child{text-align:left;padding-left:14px;width:26px}
-.bxh-tbl th:nth-child(2),.bxh-tbl td:nth-child(2){text-align:left}
+.bxh-tbl th:nth-child(2),.bxh-tbl td:nth-child(2){text-align:left;width:40%}
 .bxh-tbl td{padding:9px 10px;border-bottom:1px solid rgba(27,50,85,.5);text-align:center;vertical-align:middle}
 .bxh-tbl tr:last-child td{border-bottom:none}
 .bxh-tbl tr.adv td{background:rgba(34,197,94,.05)}
@@ -217,7 +217,7 @@ body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100vh
 .rank-badge.r2{background:linear-gradient(135deg,#94a3b8,#cbd5e1);color:#000}
 .rank-badge.r3{background:linear-gradient(135deg,#b45309,#d97706);color:#fff}
 .rank-badge.rn{background:var(--bg3);color:var(--tx3)}
-.bxh-team{font-weight:600;color:var(--tx);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px}
+.bxh-team{font-weight:600;color:var(--tx);font-size:13px;line-height:1.3;word-break:break-word}
 .adv-tag{font-size:10px;color:var(--gn);font-weight:700;margin-left:3px}
 .w-badge{background:rgba(34,197,94,.15);color:var(--gn);font-weight:700;padding:2px 6px;border-radius:10px;font-size:11px}
 .l-badge{background:rgba(239,68,68,.1);color:var(--rd);font-weight:700;padding:2px 6px;border-radius:10px;font-size:11px}
@@ -391,7 +391,7 @@ body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100vh
   <div id="navtabs">
     <button class="ntab on" data-tab="live" onclick="switchTab('live')">🔴 Đang đấu</button>
     <button class="ntab" data-tab="schedule" onclick="switchTab('schedule')">📋 Lịch đấu</button>
-    <button class="ntab" data-tab="standings" onclick="switchTab('standings')">🏅 BXH</button>
+    <button class="ntab" data-tab="standings" onclick="switchTab('standings')">🏅 Bảng đấu</button>
     <button class="ntab" data-tab="bracket" onclick="switchTab('bracket')">🏆 Cây thi đấu</button>
   </div>
 
@@ -1019,10 +1019,11 @@ function renderSchedule(){
       }else{
         mid=`<div class="mr-vs">VS</div>`;
       }
+      const fmtT=t=>esc(t).replace(' - ','<br>');
       return `<div class="match-row ${status}">
-        <div class="mr-team${aW?' winner':''}">${esc(tA)}</div>
+        <div class="mr-team${aW?' winner':''}">${fmtT(tA)}</div>
         <div class="mr-mid">${mid}<div class="mr-info">${court?esc(court):''}${round?' · '+esc(round):''}</div></div>
-        <div class="mr-team right${bW?' winner':''}">${esc(tB)}</div>
+        <div class="mr-team right${bW?' winner':''}">${fmtT(tB)}</div>
       </div>`;
     }).join('');
     return {meta, rows};
@@ -1092,17 +1093,37 @@ function renderStandings(){
   const res=getResults();
   const KO=['Tứ kết','Bán kết','Chung kết','Hạng 3','Vòng 16','TK','BK','CK','H3'];
   const isKo=n=>KO.some(k=>n.startsWith(k)||n.includes(k));
+  const gUp=(_giaiName||USER_GIAI||'').toUpperCase();
 
-  // Group by bang (pool only)
+  // FIX: Lấy tất cả bảng từ _M (kể cả chưa có kết quả)
+  const allBangsFromM=new Set(
+    _M.filter(m=>{
+      const g=String(m[0]||'').trim().toUpperCase();
+      const nd=String(m[1]||'').trim();
+      const bang=String(m[2]||'').trim();
+      if(gUp&&g&&g!==gUp)return false;
+      if(_curNd&&nd&&nd!==_curNd)return false;
+      return bang&&!isKo(bang);
+    }).map(m=>String(m[2]||'').trim())
+  );
+
+  // Group results by bang
   const byBang=new Map();
-  res.filter(r=>!isKo(String(r[3]||''))).forEach(r=>{
+  // Khởi tạo tất cả bảng từ _M (kể cả chưa có kết quả)
+  allBangsFromM.forEach(b=>{ if(!byBang.has(b))byBang.set(b,[]); });
+  // Thêm kết quả vào đúng bảng
+  res.filter(r=>{
+    const nd=String(r[2]||'').trim();
+    const bang=String(r[3]||'').trim();
+    return !isKo(bang)&&(!_curNd||nd===_curNd);
+  }).forEach(r=>{
     const b=String(r[3]||'');if(!b)return;
     if(!byBang.has(b))byBang.set(b,[]);
     byBang.get(b).push(r);
   });
 
   if(!byBang.size){
-    wrap.innerHTML='<div class="empty-state"><div class="empty-icon">🏅</div><div class="empty-msg">Chưa có kết quả để xếp hạng</div></div>';
+    wrap.innerHTML='<div class="empty-state"><div class="empty-icon">🏅</div><div class="empty-msg">Chưa có dữ liệu bảng đấu</div></div>';
     return;
   }
 
@@ -1135,7 +1156,7 @@ function renderStandings(){
       meta:`${st.length} đội · ${rows.length} trận`,
       tbody:st.map((s,i)=>`<tr${i<adv?' class="adv"':''}>
         <td><span class="rank-badge ${rk(i)}">${i+1}</span></td>
-        <td><span class="bxh-team">${esc(s.team)}</span>${i<adv?'<span class="adv-tag">▲</span>':''}</td>
+        <td><span class="bxh-team">${esc(s.team).replace(' - ','<br>')}</span>${i<adv?'<span class="adv-tag">▲</span>':''}</td>
         <td>${s.played}</td>
         <td><span class="w-badge">${s.won}</span> <span class="l-badge">${s.lost}</span></td>
         <td>${s.pf}</td><td>${s.pa}</td>
