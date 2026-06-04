@@ -4,7 +4,7 @@
 <!-- Pickleball v67 2026-06-03: v6 FIX NGUỒN DUY NHẤT — buildDkFromResults/isMatchDone/getFinalScore/_syncResultCache/_buildLiveFromRows đều dùng key 4 trường "TênGiải|NộiDung|Bảng|MãTrận"; bỏ fallback Matches col[5/6] trong getFinalScore; bỏ giaiId duplicate trong _dK; bỏ fallback giaiId trong isMatchDone — badge Hoàn thành/Chưa đấu/Đang đấu giờ chính xác 100% từ KetQua | v66 2026-06-03: FIX v32 referee bugs — assignCourtToRef/assignRef/atrAssignDirect không xóa noidung cũ; _matchAllowed normalize dấu; renderMatchGrid hiển thị khi có trận phân tên | v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Admin v7 — Referee Pickleball / DA NANG ®</title>
+<title>Admin v7.2 — Referee Pickleball / DA NANG ®</title>
 <style>
 /* ═══════════════════════════════════════════════════════
    Pickleball Admin — Mobile-First Professional UI
@@ -1376,6 +1376,12 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
               <button id="nd-btn-bye-toggle" onclick="ndBkToggleByeRule()"
                 style="background:rgba(34,197,94,.12);color:var(--gn);border:1px solid rgba(34,197,94,.35);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s">
                 ✅ BYE
+              </button>
+              <!-- Tạo cây thi đấu (v7: nút mới — chỉ tạo cây, không lưu GSheet) -->
+              <button id="nd-btn-genchart" onclick="ndBkGenChart()"
+                style="background:rgba(168,85,247,.15);color:#c084fc;border:1px solid rgba(168,85,247,.4);border-radius:8px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s"
+                title="Tạo cây thi đấu từ BXH vòng bảng (chỉ hiển thị, chưa lưu)">
+                🏗 Tạo cây
               </button>
               <!-- Áp dụng & Tạo lịch — nút chính -->
               <button id="nd-btn-apply" onclick="ndBkApplyFull()"
@@ -9886,6 +9892,47 @@ function ndBkToggleByeRule() {
   _ndBkUpdateToolbarUI();
 }
 
+// ── v7: Tạo cây thi đấu (xem trước — KHÔNG ghi GSheet) ──────────────
+// Chỉ render cây từ BXH hiện tại để admin xem vị trí các đội.
+// Không tạo trận trong Matches sheet. Dùng "Áp dụng & Tạo lịch" để lưu thật.
+async function ndBkGenChart() {
+  _bkGiai = _curGiaiId || _bkGiai;
+  _bkNd   = _curNd     || _bkNd;
+  _bkGiaiName = _resolveGiaiName(_bkGiai) || _bkGiai;
+  if (!_bkGiai || !_bkNd) { toast('Chọn giải và nội dung trước', 'er'); return; }
+
+  const btn = document.getElementById('nd-btn-genchart');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Đang tạo...'; }
+
+  try {
+    // Tính seeding từ BXH hiện tại
+    const { seeds, bangs, bangDone } = _bkCalcSeeds(_bkGiai, _bkNd);
+    if (!bangs.length) {
+      toast('Chưa có dữ liệu vòng bảng để tạo cây', 'er');
+      return;
+    }
+
+    // Reset overrides để xem cây chuẩn (không bị ảnh hưởng bởi drag-drop cũ)
+    _bkOverrides = {};
+    _bkCurrentTree = null;
+
+    // Render cây xem trước — chỉ hiển thị, không lưu
+    await _swapBkWrap('nd-bk-wrap', () => Promise.resolve(bkRender()));
+
+    const allDone = bangs.every(b => bangDone?.[b]);
+    const pendingBangs = bangs.filter(b => !bangDone?.[b]);
+    if (!allDone) {
+      toast(`🏗 Cây thi đấu đã tạo (xem trước) · ${pendingBangs.length} bảng chưa xong: ${pendingBangs.join(', ')} · Nhấn "Áp dụng & Tạo lịch" để lưu`, 'in', 5000);
+    } else {
+      toast('🏗 Cây thi đấu đã tạo (xem trước) · Nhấn "Áp dụng & Tạo lịch" để lưu vào lịch', 'ok', 4000);
+    }
+  } catch(e) {
+    toast('❌ Lỗi tạo cây: ' + (e.message || e), 'er');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🏗 Tạo cây'; }
+  }
+}
+
 // ── Toolbar mới: Áp dụng & Tạo lịch + tự động lưu + bật auto-poll ──
 async function ndBkApplyFull() {
   _bkGiai = _curGiaiId || _bkGiai;
@@ -12131,9 +12178,16 @@ Hành động này không thể hoàn tác!`
       } catch(e) { fail++; }
     }
 
-    // Clear overrides localStorage
+    // Clear overrides localStorage + GAS sheet (v7 FIX: xóa luôn trên sheet)
     _bkOverrides = {};
-    _bkSaveOverrides();
+    _bkLastVersion = 0;
+    try { localStorage.removeItem(_bkKey()); } catch(e) {}
+    // Xóa hẳn overrides trên GAS BracketOverrides sheet
+    const giaiNameDel = _resolveGiaiName(_bkGiai) || _bkGiai;
+    gPost({ action:'saveBracketOverrides', adminCode:CODE,
+            giai:giaiNameDel, nd:_bkNd, overrides:{} }).then(d => {
+      if (d?.ok) console.log('[BK DELETE] Cleared overrides on GAS sheet');
+    }).catch(e => console.warn('[BK DELETE] Failed to clear GAS overrides:', e));
 
     if (fail===0) {
       toast(`✅ Đã xóa ${ok} trận KO — cây thi đấu được reset`, 'ok');
