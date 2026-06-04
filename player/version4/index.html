@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>Pickleball v3.29— Xem Giải Đấu</title>
+<title>Pickleball v3.30— Xem Giải Đấu</title>
 <style>
 /* system font - no import needed */
 :root{
@@ -465,6 +465,25 @@ let _hardReloadTimer=null; // v3: Hard reload toàn bộ cache mỗi N phút
 const REFRESH_SEC=8;          // Cập nhật live/kết quả mỗi 8s
 const PERM_CHECK_SEC=20;      // Kiểm tra phân quyền mỗi 20s
 const HARD_RELOAD_MIN=30;     // FIX v3.3: Tăng lên 30 phút — 3 phút gây full reload nháy màn hình
+const INACTIVITY_MIN=240;     // Tự động đăng xuất sau 4 giờ không hoạt động (240 phút)
+const _LAST_ACTIVE_KEY='pb_player_last_active';
+
+// ── Inactivity logout ──
+function _touchActive(){
+  // Cập nhật thời điểm hoạt động cuối
+  try{ localStorage.setItem(_LAST_ACTIVE_KEY, Date.now()); }catch(e){}
+}
+function _isSessionExpired(){
+  try{
+    const t=parseInt(localStorage.getItem(_LAST_ACTIVE_KEY)||'0');
+    if(!t) return false; // lần đầu, chưa có → không expire
+    return (Date.now()-t) > INACTIVITY_MIN*60*1000;
+  }catch(e){ return false; }
+}
+// Lắng nghe mọi tương tác của user → reset inactivity timer
+['click','keydown','scroll','touchstart'].forEach(ev=>{
+  document.addEventListener(ev, _touchActive, {passive:true});
+});
 const DATA_VER_KEY='pb_pdata_ver'; // v3: version key để detect admin change
 
 // ══ UTILS ══
@@ -504,8 +523,15 @@ function loadSaved(){
     if(!s)return false;
     const j=JSON.parse(s);
     if(!j.u||!j.c)return false;
+    // FIX v3.29: Kiểm tra session expired (không hoạt động > INACTIVITY_MIN phút)
+    // → xóa cache, hiện màn hình đăng nhập, không auto-login
+    if(_isSessionExpired()){
+      localStorage.removeItem('pb_player_v6');
+      localStorage.removeItem(_LAST_ACTIVE_KEY);
+      console.log('[AUTH] Session expired — require re-login');
+      return false; // hiện màn hình đăng nhập
+    }
     GS=j.u;USER_CODE=j.c;
-    // KHÔNG restore USER_GIAI/USER_ND từ cache - luôn fetch lại từ server
     USER_NAME='';USER_GIAI='';USER_ND='';
     return true;
   }catch(e){return false;}
@@ -548,6 +574,8 @@ function hideErr(){$('login-err').style.display='none';}
 function doLogout(){
   if(!confirm('Đăng xuất?'))return;
   localStorage.removeItem('pb_player_v6');
+  localStorage.removeItem(_LAST_ACTIVE_KEY); // FIX v3.29: clear inactivity timer
+  try{sessionStorage.removeItem('pb_ui_tab');sessionStorage.removeItem('pb_ui_nd');}catch(e){}
   stopRefresh();
   $('app').style.display='none';
   $('login-screen').style.display='flex';
@@ -559,14 +587,11 @@ function doLogout(){
 async function startApp(){
   $('login-screen').style.display='none';
   $('app').style.display='block';
-  // Reset toàn bộ state cũ
+  _touchActive(); // FIX v3.29: Ghi nhận thời điểm login/start
   _M=[];_R=[];_L=[];_T=null;_giaiName='';_curNd='';_allNds=[];
   try{await loadAll();}catch(e){console.error('loadAll:',e);}
-  // FIX v3.3: Khôi phục tab + nd từ session (giữ vị trí khi reload/refresh)
   _restoreUiFromSession();
-  // Validate nd sau khi loadAll (nd có thể không còn hợp lệ)
   if(_curNd&&!_allNds.includes(_curNd)) _curNd=_allNds[0]||'';
-  // Apply tab đã khôi phục
   document.querySelectorAll('.ntab').forEach(b=>b.classList.toggle('on',b.dataset.tab===_curTab));
   document.querySelectorAll('.page').forEach(p=>p.classList.toggle('on',p.id==='tab-'+_curTab));
   renderNdFilter();
@@ -1780,6 +1805,7 @@ window.addEventListener('load',async()=>{
     }else{
       // validate thất bại hoặc chưa có phân quyền → xóa cache, hiện login
       localStorage.removeItem('pb_player_v6');
+      localStorage.removeItem(_LAST_ACTIVE_KEY); // FIX v3.29
       // Không redirect, giữ màn hình login để user tự đăng nhập lại
     }
   }
