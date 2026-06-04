@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>Pickleball v4— Xem Giải Đấu</title>
+<title>Pickleball v3.36— Xem Giải Đấu</title>
 <style>
 /* system font - no import needed */
 :root{
@@ -18,7 +18,7 @@
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html{-webkit-text-size-adjust:100%}
-body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100vh;overflow-x:hidden;
+body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100vh;overflow-x:hidden;width:100%;max-width:100vw;
   background-image:radial-gradient(ellipse 120% 60% at 50% -20%,rgba(14,165,233,.08),transparent 60%)}
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:var(--bg)}
@@ -125,7 +125,20 @@ body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100vh
 
 /* ══ LIVE CARDS ══ */
 .live-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
-@media(max-width:500px){.live-grid{grid-template-columns:1fr}}
+@media(max-width:500px){
+  .live-grid{grid-template-columns:1fr}
+  .ntab{padding:9px 12px;font-size:12px}
+  .bk-round{min-width:140px}
+  .bk-card{margin:0 3px;border-radius:6px}
+  .bxh-tbl{font-size:10px}
+  .bxh-tbl th{font-size:8px;padding:4px 3px}
+  .bxh-tbl td{padding:7px 3px}
+  .rank-badge{width:18px;height:18px;font-size:10px}
+  #main{padding:6px 8px}
+  .bang-card{border-radius:8px}
+  .mr-team{font-size:11px}
+  .lc-num{font-size:36px}
+}
 
 .live-card{background:var(--bg2);border:1px solid var(--bdr2);border-radius:var(--r2);
   overflow:hidden;border-top:3px solid var(--or);transition:transform .15s,box-shadow .15s;
@@ -203,12 +216,13 @@ body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100vh
 .bxh-arrow.open{transform:rotate(180deg)}
 .bxh-body{display:none}
 .bxh-body.open{display:block}
-.bxh-tbl{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
-.bxh-tbl th{padding:7px 10px;font-size:10px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;
-  color:var(--tx3);text-align:center;background:rgba(0,0,0,.2);border-bottom:1px solid var(--bdr)}
-.bxh-tbl th:first-child,.bxh-tbl td:first-child{text-align:left;padding-left:14px;width:26px}
-.bxh-tbl th:nth-child(2),.bxh-tbl td:nth-child(2){text-align:left;width:40%}
-.bxh-tbl td{padding:9px 10px;border-bottom:1px solid rgba(27,50,85,.5);text-align:center;vertical-align:middle}
+.bxh-tbl{width:100%;border-collapse:collapse;font-size:11px;table-layout:auto}
+.bxh-tbl th{padding:5px 4px;font-size:9px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;
+  color:var(--tx3);text-align:center;background:rgba(0,0,0,.2);border-bottom:1px solid var(--bdr);white-space:nowrap}
+.bxh-tbl th:first-child,.bxh-tbl td:first-child{text-align:left;padding-left:10px;width:28px}
+.bxh-tbl th:nth-child(2),.bxh-tbl td:nth-child(2){text-align:left;max-width:0;width:99%}
+.bxh-tbl th:nth-child(n+3),.bxh-tbl td:nth-child(n+3){white-space:nowrap;padding:5px 5px}
+.bxh-tbl td{padding:8px 4px;border-bottom:1px solid rgba(27,50,85,.5);text-align:center;vertical-align:middle}
 .bxh-tbl tr:last-child td{border-bottom:none}
 .bxh-tbl tr.adv td{background:rgba(34,197,94,.05)}
 .rank-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
@@ -217,10 +231,10 @@ body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100vh
 .rank-badge.r2{background:linear-gradient(135deg,#94a3b8,#cbd5e1);color:#000}
 .rank-badge.r3{background:linear-gradient(135deg,#b45309,#d97706);color:#fff}
 .rank-badge.rn{background:var(--bg3);color:var(--tx3)}
-.bxh-team{font-weight:600;color:var(--tx);font-size:13px;line-height:1.3;word-break:break-word}
+.bxh-team{font-weight:600;color:var(--tx);font-size:12px;line-height:1.3;word-break:break-word;display:block}
 .adv-tag{font-size:10px;color:var(--gn);font-weight:700;margin-left:3px}
-.w-badge{background:rgba(34,197,94,.15);color:var(--gn);font-weight:700;padding:2px 6px;border-radius:10px;font-size:11px}
-.l-badge{background:rgba(239,68,68,.1);color:var(--rd);font-weight:700;padding:2px 6px;border-radius:10px;font-size:11px}
+.w-badge{background:rgba(34,197,94,.15);color:var(--gn);font-weight:800;padding:1px 5px;border-radius:8px;font-size:11px;display:inline-block}
+.l-badge{background:rgba(239,68,68,.1);color:var(--rd);font-weight:800;padding:1px 5px;border-radius:8px;font-size:11px;display:inline-block}
 
 /* ── SECTION LABEL ── */
 .sec-label{font-family:var(--fh);font-size:11px;font-weight:800;letter-spacing:1.5px;
@@ -243,7 +257,7 @@ body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100vh
 /* ══ CÂY THI ĐẤU (BRACKET) ══ */
 .bk-bracket{display:flex;flex-direction:row;align-items:stretch;
   padding:0 4px 8px;gap:0;min-width:max-content;width:max-content}
-.bk-round{display:flex;flex-direction:column;gap:0;flex-shrink:0;min-width:190px}
+.bk-round{display:flex;flex-direction:column;gap:0;flex-shrink:0;min-width:160px}
 .bk-round-label{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;
   text-align:center;padding:0 12px 14px;height:38px;display:flex;
   align-items:flex-end;justify-content:center;color:var(--tx3);white-space:nowrap}
@@ -255,7 +269,7 @@ body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100vh
 .bk-round-label.lbl-group{color:#818cf8}
 .bk-round-slots{display:flex;flex-direction:column;flex:1;justify-content:space-around;gap:0}
 .bk-slot{display:flex;flex-direction:column;flex:1;justify-content:center;padding:4px 0}
-.bk-card{margin:0 8px;background:var(--bg2);border:1px solid var(--bdr);
+.bk-card{margin:0 4px;background:var(--bg2);border:1px solid var(--bdr);
   border-left:3px solid var(--bdr2);border-radius:10px;overflow:hidden;transition:border-color .15s}
 .bk-card.c-done{border-left-color:#22c55e}
 .bk-card.c-live{border-left-color:#f97316;animation:bk-pulse 1.8s ease-in-out infinite}
@@ -335,7 +349,8 @@ body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100vh
 .bk-sec-line{flex:1;height:1px;background:var(--bdr)}
 /* Bracket wrapper with scroll */
 .bk-scroll{overflow-x:auto;overflow-y:visible;padding-bottom:8px;
-  scrollbar-width:thin;scrollbar-color:var(--bdr3) transparent}
+  scrollbar-width:thin;scrollbar-color:var(--bdr3) transparent;
+  width:100%;max-width:100%;box-sizing:border-box}
 .bk-scroll::-webkit-scrollbar{height:6px}
 .bk-scroll::-webkit-scrollbar-track{background:var(--bg2);border-radius:4px}
 .bk-scroll::-webkit-scrollbar-thumb{background:var(--bdr3);border-radius:4px}
@@ -1158,7 +1173,7 @@ function renderStandings(){
         <td><span class="rank-badge ${rk(i)}">${i+1}</span></td>
         <td><span class="bxh-team">${esc(s.team).replace(' - ','<br>')}</span>${i<adv?'<span class="adv-tag">▲</span>':''}</td>
         <td>${s.played}</td>
-        <td><span class="w-badge">${s.won}</span> <span class="l-badge">${s.lost}</span></td>
+        <td style="white-space:nowrap"><span class="w-badge">${s.won}</span><span class="l-badge">${s.lost}</span></td>
         <td>${s.pf}</td><td>${s.pa}</td>
         <td style="color:${s.pf-s.pa>=0?'var(--gn)':'var(--rd)'};font-weight:700">${s.pf-s.pa>=0?'+':''}${s.pf-s.pa}</td>
       </tr>`).join('')
