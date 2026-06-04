@@ -3,8 +3,8 @@
 <head>
 <!-- Pickleball v67 2026-06-03: v6 FIX NGUỒN DUY NHẤT — buildDkFromResults/isMatchDone/getFinalScore/_syncResultCache/_buildLiveFromRows đều dùng key 4 trường "TênGiải|NộiDung|Bảng|MãTrận"; bỏ fallback Matches col[5/6] trong getFinalScore; bỏ giaiId duplicate trong _dK; bỏ fallback giaiId trong isMatchDone — badge Hoàn thành/Chưa đấu/Đang đấu giờ chính xác 100% từ KetQua | v66 2026-06-03: FIX v32 referee bugs — assignCourtToRef/assignRef/atrAssignDirect không xóa noidung cũ; _matchAllowed normalize dấu; renderMatchGrid hiển thị khi có trận phân tên | v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Admin v8.2 — Referee Pickleball / DA NANG ®</title>
+<meta name="viwport" content="width=device-width,initial-scale=1.0">
+<title>Admin v8.2.41 — Referee Pickleball / DA NANG ®</title>
 <style>
 /* ═══════════════════════════════════════════════════════
    Pickleball Admin — Mobile-First Professional UI
@@ -11816,6 +11816,33 @@ async function bkApplyAndSave() {
   const koMatches = allM.filter(m=>{const v=String(m[9]||'');return v&&v!=='Vòng bảng'&&!v.includes('bảng');});
   const koByCode = {};
   koMatches.forEach(m=>{koByCode[String(m[3]||'')]=m;});
+
+  // v8 FIX: Xóa tất cả KO matches cũ trước khi tạo mới
+  // Tránh conflict khi mã trận trùng giữa các lần áp dụng (V161..V168 từ cap=16 vs cap=32)
+  if (koMatches.length > 0) {
+    toast('🗑 Đang xóa lịch KO cũ để tạo lại...', 'in');
+    try {
+      const delResult = await gPost({
+        action: 'deleteBracketTree',
+        adminCode: CODE,
+        giai: giaiName,
+        nd: _bkNd,
+        onlyKO: true // v8: chỉ xóa KO, không xóa Vòng bảng
+      });
+      if (delResult.ok) {
+        // Xóa khỏi _M local
+        const keepM = _M.filter(m => {
+          if (String(m[0]||'')!==giaiName || String(m[1]||'')!==_bkNd) return true;
+          const v = String(m[9]||'');
+          return !v || v==='Vòng bảng' || v.toLowerCase().includes('bảng');
+        });
+        _M.length = 0; keepM.forEach(r=>_M.push(r));
+        console.log('[Apply] Đã xóa', koMatches.length, 'KO matches cũ');
+      }
+    } catch(e) { console.warn('[Apply] Không xóa được KO cũ:', e); }
+    // Reset koByCode sau khi xóa — tạo mới tất cả
+    Object.keys(koByCode).forEach(k => delete koByCode[k]);
+  }
 
   // Duyệt tất cả round (kể cả H3)
   let created=0, updated=0, skipped=0;
