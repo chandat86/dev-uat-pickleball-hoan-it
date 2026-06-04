@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>Pickleball v6— Xem Giải Đấu</title>
+<title>Pickleball v3.22— Xem Giải Đấu</title>
 <style>
 /* system font - no import needed */
 :root{
@@ -417,6 +417,9 @@ let GS=GAS_URL, USER_NAME='', USER_CODE='', USER_GIAI='', USER_ND='';
 let _M=[], _R=[], _L=[], _T=null, _giaiName='';
 let _curTab='live', _curNd='', _allNds=[];
 let _liveTimer=null;
+// v37: Bracket snapshot cache
+let _bkSnapCache={};       // {nd: {tree, overrides, byeRule, version}}
+let _bkSnapVersion=0;      // version của snapshot đang hiển thị
 let _permTimer=null;
 let _hardReloadTimer=null; // v3: Hard reload toàn bộ cache mỗi N phút
 const REFRESH_SEC=8;          // Cập nhật live/kết quả mỗi 8s
@@ -538,9 +541,9 @@ function stopRefresh(){
 // v3: Xóa toàn bộ cache dữ liệu trận đấu (không xóa session login)
 function _clearDataCache(){
   _M=[];_R=[];_L=[];_T=null;_giaiName='';_curNd='';_allNds=[];
-  // Xóa version tracking để force fresh fetch
+  _bkSnapCache={};_bkSnapVersion=0; // v37: xóa bracket snapshot cache
   try{ sessionStorage.removeItem(DATA_VER_KEY); }catch(e){}
-  console.log('[v3] Data cache cleared');
+  console.log('[v3] Data cache cleared (incl bracket snapshot)');
 }
 
 // v3: Hard reload định kỳ — fetch lại toàn bộ từ server, cập nhật cây thi đấu & VĐV
@@ -1310,6 +1313,48 @@ function _bkBuildAndRenderTree(nd,wrap){
   wrap.innerHTML=html;
 }
 
+// v37: Fetch bracket snapshot từ GAS và cache lại
+async function _fetchBracketSnap(nd){
+  if(!GS||!nd)return null;
+  try{
+    const gName=_giaiName||USER_GIAI||'';
+    const url=new URL(GS);
+    url.searchParams.set('action','getBracketSnapshot');
+    url.searchParams.set('giai',gName);
+    url.searchParams.set('nd',nd);
+    url.searchParams.set('_t',Date.now());
+    const r=await fetch(url.toString(),{cache:'no-store'});
+    const d=await r.json();
+    if(d.ok&&d.snapshot&&d.version){
+      _bkSnapCache[nd]={...d.snapshot,version:d.version};
+      _bkSnapVersion=d.version;
+      console.log('[PLAYER SNAP] Loaded snapshot v',d.version,'for',nd);
+      return _bkSnapCache[nd];
+    }
+  }catch(e){console.warn('[PLAYER SNAP] fetch error:',e);}
+  return null;
+}
+
+// v37: Check nếu snapshot đã cũ (poll version)
+async function _checkBracketVersion(nd){
+  if(!GS||!nd)return false;
+  try{
+    const gName=_giaiName||USER_GIAI||'';
+    const url=new URL(GS);
+    url.searchParams.set('action','getBracketVersion');
+    url.searchParams.set('giai',gName);
+    url.searchParams.set('nd',nd);
+    url.searchParams.set('_t',Date.now());
+    const r=await fetch(url.toString(),{cache:'no-store'});
+    const d=await r.json();
+    if(d.ok&&d.version&&d.hasSnapshot){
+      const cached=_bkSnapCache[nd];
+      if(!cached||d.version>cached.version){return true;} // có version mới
+    }
+  }catch(e){}
+  return false;
+}
+
 function renderBracketTab(){
   const wrap=$('bracket-content');
   const nd=_curNd;
@@ -1317,8 +1362,154 @@ function renderBracketTab(){
     wrap.innerHTML='<div class="empty-state"><div class="empty-icon">🏆</div><div class="empty-msg">Chọn nội dung thi đấu</div><div class="empty-sub">Dùng bộ lọc bên trên để chọn nội dung</div></div>';
     return;
   }
-  wrap.innerHTML='<div id="bk-inner"></div>';
-  _bkBuildAndRenderTree(nd,$('bk-inner'));
+  // v37: Ưu tiên snapshot từ GAS (source of truth), fallback sang rebuild local
+  const cached=_bkSnapCache[nd];
+  if(cached&&cached.tree){
+    // Có snapshot cache → render ngay, đồng thời check version ngầm
+    wrap.innerHTML='<div id="bk-inner"></div>';
+    _bkRenderFromSnapshot(nd,cached,$('bk-inner'));
+    // Check version ngầm — nếu có version mới thì fetch lại
+    _checkBracketVersion(nd).then(hasNew=>{
+      if(hasNew)return _fetchBracketSnap(nd).then(snap=>{
+        if(snap&&$('bk-inner')){
+          const inner=$('bk-inner');
+          if(inner){inner.innerHTML='';_bkRenderFromSnapshot(nd,snap,inner);}
+        }
+      });
+    }).catch(()=>{});
+  }else{
+    // Chưa có cache → hiện loading, fetch snapshot
+    wrap.innerHTML='<div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-msg">Đang tải cây thi đấu...</div></div>';
+    _fetchBracketSnap(nd).then(snap=>{
+      const w=$('bracket-content');if(!w)return;
+      w.innerHTML='<div id="bk-inner"></div>';
+      if(snap&&snap.tree){
+        _bkRenderFromSnapshot(nd,snap,$('bk-inner'));
+      }else{
+        // Fallback: rebuild từ _M local (chưa có snapshot)
+        _bkBuildAndRenderTree(nd,$('bk-inner'));
+      }
+    }).catch(()=>{
+      const w=$('bracket-content');if(!w)return;
+      w.innerHTML='<div id="bk-inner"></div>';
+      _bkBuildAndRenderTree(nd,$('bk-inner'));
+    });
+  }
+}
+
+// v37: Render cây thi đấu từ snapshot data (không rebuild từ seeds)
+function _bkRenderFromSnapshot(nd,snap,wrap){
+  if(!snap||!snap.tree||!snap.tree.rounds){
+    // Snapshot rỗng hoặc chưa áp dụng → fallback rebuild
+    _bkBuildAndRenderTree(nd,wrap);
+    return;
+  }
+  const roundMatches=snap.tree.rounds||[];
+  const overrides=snap.overrides||{};
+  const gUp=((_giaiName||USER_GIAI||'')).toUpperCase();
+  // Lấy KO matches từ _M để check done/live
+  const allM=_M.filter(m=>String(m[0]||'').trim().toUpperCase()===gUp&&String(m[1]||'')===nd);
+  const koMatches=allM.filter(m=>{const v=String(m[9]||'');return v&&v!=='Vòng bảng'&&!v.includes('bảng');});
+  const koByCode={};koMatches.forEach(m=>{koByCode[String(m[3]||'')]=m;});
+
+  // Merge overrides vào tree
+  roundMatches.forEach(round=>{round.matches.forEach(m=>{
+    const ov=overrides[m.code];if(!ov)return;
+    if(ov.teamA!==undefined)m.teamA=ov.teamA;
+    if(ov.teamB!==undefined)m.teamB=ov.teamB;
+    if(ov.isByeA===true&&!ov.byeAOverridden){m.isByeA=true;m.teamA='';m.seedA='BYE';}
+    if(ov.isByeB===true&&!ov.byeBOverridden){m.isByeB=true;m.teamB='';m.seedB='BYE';}
+    if(ov.seedCodeA)m.seedA=ov.seedCodeA;
+    if(ov.seedCodeB)m.seedB=ov.seedCodeB;
+  });});
+
+  // Pill helpers
+  const pillCls=(s)=>{
+    if(!s)return'p-num';if(s.startsWith('Thắng')||s==='W')return'p-w';if(s.startsWith('BYE'))return'p-bye';
+    const sm=s.match(/^[1-4]([A-Z])$/i);if(sm)return'p-'+sm[1].toUpperCase();
+    const bm=s.match(/Bảng\s+([A-Z])/i);if(bm)return'p-'+bm[1].toUpperCase();return'p-num';
+  };
+  const pillLabel=(s)=>{
+    if(!s)return'?';if(s.startsWith('Thắng'))return'W';if(s==='BYE')return'BYE';
+    if(/^[1-4][A-Z]$/i.test(s.trim()))return s.trim().toUpperCase();
+    const rank=s.includes('Nhất')?1:s.includes('Nhì')?2:s.includes('Ba')?3:s.includes('Tư')?4:0;
+    const bm=s.match(/Bảng\s+([A-Z])/i);const bg=bm?bm[1].toUpperCase():'';
+    if(rank&&bg)return rank+bg;return'?';
+  };
+  const mkCard=(m,done,live,fs,mc)=>{
+    const tA=m.teamA||'',tB=m.teamB||'';
+    const winA=fs&&fs.scoreA>fs.scoreB,winB=fs&&fs.scoreB>fs.scoreA;
+    const cardCls='bk-card'+(done?' c-done':'')+(live?' c-live':'')+(mc?' '+mc:'');
+    const rA=m.isByeA?'r-bye':(!tA?'r-tbd':winA?'r-win':'');
+    const rB=m.isByeB?'r-bye':(!tB?'r-tbd':winB?'r-win':'');
+    const nA=m.isByeA?'BYE':(tA||'—'),nB=m.isByeB?'BYE':(tB||'—');
+    const plA=pillLabel(m.seedA||''),plB=pillLabel(m.seedB||'');
+    const pcA=pillCls(m.seedA||''),pcB=pillCls(m.seedB||'');
+    const scA=fs?`<div class="bk-sbox${winA?' s-win':''}">${fs.scoreA}</div>`:'<div class="bk-sbox s-empty">—</div>';
+    const scB=fs?`<div class="bk-sbox${winB?' s-win':''}">${fs.scoreB}</div>`:'<div class="bk-sbox s-empty">—</div>';
+    return`<div class="${cardCls}">
+      <div class="bk-card-hd"><span>${m.code}</span>
+        <div style="display:flex;align-items:center;gap:4px">
+          ${live?'<span class="bk-live-dot"></span><span style="font-size:9px;color:#f97316;font-weight:700">LIVE</span>':''}
+          ${done?'<span style="font-size:10px;color:#22c55e;font-weight:700">✓</span>':''}
+        </div></div>
+      <div class="bk-row ${rA}">
+        <div class="bk-pill ${pcA}" title="${esc(m.seedA||'')}">${plA}</div>
+        <div class="bk-tname" title="${esc(nA)}">${esc(nA)}</div>${scA}
+      </div>
+      <div class="bk-row ${rB}">
+        <div class="bk-pill ${pcB}" title="${esc(m.seedB||'')}">${plB}</div>
+        <div class="bk-tname" title="${esc(nB)}">${esc(nB)}</div>${scB}
+      </div>
+    </div>`;
+  };
+  const mkConn=(nP,cc)=>{let h=`<div class="bk-conn-col ${cc}">`;for(let i=0;i<nP;i++)h+=`<div class="bk-conn-pair"><div class="bk-conn-arm arm-top"></div><div class="bk-conn-arm arm-bot"></div></div>`;return h+'</div>';};
+  const connCls=(r)=>{if(r.fromFin===0)return'cc-final';if(r.fromFin===1)return'cc-sf';if(r.fromFin===2)return'cc-qf';return'';};
+  const roundLblCls=(r)=>{if(r.fromFin===0)return'lbl-final';if(r.fromFin===1)return'lbl-sf';if(r.fromFin===2)return'lbl-qf';if(r.fromFin>=3)return'lbl-r16';return'';};
+  const matchRoundCls=(r,isLast)=>{if(isLast)return'c-final';if(r.fromFin===1)return'c-sf';if(r.fromFin===2)return'c-qf';return'';};
+
+  const koRoundsOnly=roundMatches.filter(r=>r.cls!=='bk-h3');
+  const h3Round=roundMatches.find(r=>r.cls==='bk-h3');
+  let html='';
+  if(koRoundsOnly.length){
+    html+='<div class="bk-scroll"><div class="bk-bracket">';
+    koRoundsOnly.forEach((round,ri)=>{
+      const nM=round.matches.length,isLast=ri===koRoundsOnly.length-1;
+      if(ri>0)html+=mkConn(nM,connCls(round));
+      html+=`<div class="bk-round"><div class="bk-round-label ${roundLblCls(round)}">${round.name}</div><div class="bk-round-slots">`;
+      round.matches.forEach(m=>{
+        const koM=koByCode[m.code];
+        const bang2=koM?String(koM[2]||''):'';
+        const done=koM&&_bkMatchDone(nd,bang2,m.code);
+        const live=_bkIsLive(nd,bang2,m.code);
+        const fs=done?_bkGetMatchScore(nd,bang2,m.code):null;
+        html+=`<div class="bk-slot">${mkCard(m,done,live,fs,matchRoundCls(round,isLast))}</div>`;
+      });
+      html+='</div></div>';
+    });
+    // Champion
+    const ckR=roundMatches.find(r=>r.fromFin===0);
+    let champName='';
+    if(ckR?.matches?.length){
+      const ckM=ckR.matches[0];const koMck=koByCode[ckM.code];
+      if(koMck&&_bkMatchDone(nd,String(koMck[2]||''),ckM.code)){
+        const fsCk=_bkGetMatchScore(nd,String(koMck[2]||''),ckM.code);
+        if(fsCk)champName=fsCk.scoreA>fsCk.scoreB?(ckM.teamA||String(koMck[4]||'')):(ckM.teamB||String(koMck[7]||''));
+      }
+    }
+    html+=`<div class="bk-champ-wrap"><div class="bk-champ-box"><div class="bk-champ-icon">🏆</div><div class="bk-champ-lbl">Vô địch</div>${champName?`<div class="bk-champ-name">${esc(champName)}</div>`:''}</div></div>`;
+    html+='</div></div>';
+    if(h3Round?.matches?.length){
+      const m3=h3Round.matches[0];const koM3=koByCode[m3.code];
+      const bang3=koM3?String(koM3[2]||''):'';
+      const done3=koM3&&_bkMatchDone(nd,bang3,m3.code);
+      const fs3=done3?_bkGetMatchScore(nd,bang3,m3.code):null;
+      html+=`<div style="margin-top:10px"><div class="bk-scroll"><div class="bk-bracket"><div class="bk-round"><div class="bk-round-label lbl-3rd">Hạng 3</div><div class="bk-round-slots"><div class="bk-slot">${mkCard(m3,done3,false,fs3,'c-3rd')}</div></div></div></div></div></div>`;
+    }
+  }else{
+    html='<div class="empty-state"><div class="empty-icon">🏆</div><div class="empty-msg">Vòng loại trực tiếp chưa được tạo</div></div>';
+  }
+  wrap.innerHTML=html;
 }
 
 function selectBkNd(nd){
