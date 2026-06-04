@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>Pickleball v3.28— Xem Giải Đấu</title>
+<title>Pickleball v3.29— Xem Giải Đấu</title>
 <style>
 /* system font - no import needed */
 :root{
@@ -164,6 +164,9 @@ body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100vh
 .bang-chevron.open{transform:rotate(180deg)}
 .bang-body{display:none}
 .bang-body.open{display:block}
+/* FIX v3.28: Smooth transition khi update nội dung — không flash cứng */
+.bang-head-meta{transition:color .2s;}
+.match-row{transition:background .15s;}
 
 /* trận trong bảng */
 .match-row{display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center;
@@ -909,7 +912,6 @@ function renderSchedule(){
   const rMap=buildResMap();
   const liveKeys=new Set(_L.map(l=>String(l[0]||'')));
 
-  // Group by bang
   const byBang=new Map();
   matches.forEach(m=>{
     const b=String(m[2]||'Khác');
@@ -917,21 +919,21 @@ function renderSchedule(){
     byBang.get(b).push(m);
   });
 
-  // Sort: pool bangs alphabetically, KO last
   const KO=['Tứ kết','Bán kết','Chung kết','Hạng 3','Vòng 16','TK','BK','CK','H3'];
   const isKo=n=>KO.some(k=>n.startsWith(k)||n.includes(k));
-  // Sort: Bảng pool (A,B,C...) trước, KO vòng trong sau theo thứ tự chuẩn
   const KO_ORDER=['Vòng 16','Tứ kết','Bán kết','Hạng 3','Chung kết'];
   const koRank=n=>{const i=KO_ORDER.findIndex(k=>n.startsWith(k)||n===k);return i<0?99:i;};
   const sorted=[...byBang.keys()].sort((a,b)=>{
     const aKo=isKo(a),bKo=isKo(b);
-    if(!aKo&&bKo)return -1; // pool trước
-    if(aKo&&!bKo)return 1;  // KO sau
-    if(aKo&&bKo)return koRank(a)-koRank(b); // KO theo thứ tự
-    return a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'}); // pool alphabetical
+    if(!aKo&&bKo)return -1;
+    if(aKo&&!bKo)return 1;
+    if(aKo&&bKo)return koRank(a)-koRank(b);
+    return a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'});
   });
 
-  wrap.innerHTML=sorted.map(bang=>{
+  // ── FIX v3.28: Smart patch — KHÔNG replace innerHTML toàn bộ, chỉ update phần thay đổi ──
+  // Build HTML mới cho từng bang, so sánh với DOM hiện tại → chỉ patch nếu khác
+  const _buildBangHTML=(bang)=>{
     const ms=byBang.get(bang);
     const doneCount=ms.filter(m=>isDone(m,rMap)).length;
     const liveCount=ms.filter(m=>{
@@ -965,17 +967,51 @@ function renderSchedule(){
         <div class="mr-team right${bW?' winner':''}">${esc(tB)}</div>
       </div>`;
     }).join('');
-    // FIX v3.3: Giữ nguyên trạng thái collapse của bảng khi refresh
-    const isCollapsed=_uiState.collapsedBangs.has(bang.trim().replace(/^🏆\s*/,''));
-    return `<div class="bang-card">
-      <div class="bang-head" onclick="toggleBang(this)">
-        <div class="bang-head-title">${isKo(bang)?'🏆 ':''} ${esc(bang)}</div>
-        <div class="bang-head-meta">${meta}</div>
-        <div class="bang-chevron${isCollapsed?'':' open'}">▾</div>
-      </div>
-      <div class="bang-body${isCollapsed?'':' open'}">${rows}</div>
-    </div>`;
-  }).join('');
+    return {meta, rows};
+  };
+
+  // Lấy danh sách bang-card hiện có trong DOM
+  const existingCards=wrap.querySelectorAll('.bang-card');
+  const existingByName=new Map();
+  existingCards.forEach(card=>{
+    const title=card.querySelector('.bang-head-title');
+    const name=title?title.textContent.trim().replace(/^🏆\s*/,''):'';
+    if(name) existingByName.set(name,card);
+  });
+
+  // Nếu số bảng thay đổi → full render một lần (hiếm xảy ra)
+  if(existingCards.length!==sorted.length){
+    const isCollapsed=bang=>_uiState.collapsedBangs.has(bang.trim().replace(/^🏆\s*/,''));
+    wrap.innerHTML=sorted.map(bang=>{
+      const {meta,rows}=_buildBangHTML(bang);
+      const col=isCollapsed(bang);
+      return `<div class="bang-card" data-bang="${esc(bang)}">
+        <div class="bang-head" onclick="toggleBang(this)">
+          <div class="bang-head-title">${isKo(bang)?'🏆 ':''} ${esc(bang)}</div>
+          <div class="bang-head-meta">${meta}</div>
+          <div class="bang-chevron${col?'':' open'}">▾</div>
+        </div>
+        <div class="bang-body${col?'':' open'}">${rows}</div>
+      </div>`;
+    }).join('');
+    return;
+  }
+
+  // Số bảng không đổi → patch in-place từng bảng (KHÔNG nháy màn hình)
+  sorted.forEach(bang=>{
+    const {meta,rows}=_buildBangHTML(bang);
+    const card=existingByName.get(bang);
+    if(!card) return; // không tìm thấy → bỏ qua
+
+    // Chỉ update meta nếu thay đổi
+    const metaEl=card.querySelector('.bang-head-meta');
+    if(metaEl&&metaEl.innerHTML!==meta) metaEl.innerHTML=meta;
+
+    // Chỉ update body (match rows) nếu thay đổi
+    const body=card.querySelector('.bang-body');
+    if(body&&body.innerHTML!==rows) body.innerHTML=rows;
+    // Không đụng vào collapse state → người dùng không bị mất vị trí
+  });
 }
 
 function toggleBang(head){
