@@ -4,7 +4,7 @@
 <!-- Pickleball v67 2026-06-03: v6 FIX NGUỒN DUY NHẤT — buildDkFromResults/isMatchDone/getFinalScore/_syncResultCache/_buildLiveFromRows đều dùng key 4 trường "TênGiải|NộiDung|Bảng|MãTrận"; bỏ fallback Matches col[5/6] trong getFinalScore; bỏ giaiId duplicate trong _dK; bỏ fallback giaiId trong isMatchDone — badge Hoàn thành/Chưa đấu/Đang đấu giờ chính xác 100% từ KetQua | v66 2026-06-03: FIX v32 referee bugs — assignCourtToRef/assignRef/atrAssignDirect không xóa noidung cũ; _matchAllowed normalize dấu; renderMatchGrid hiển thị khi có trận phân tên | v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Admin v8.241 — Referee Pickleball / DA NANG ®</title>
+<title>Admin v8.23 — Referee Pickleball / DA NANG ®</title>
 <style>
 /* ═══════════════════════════════════════════════════════
    Pickleball Admin — Mobile-First Professional UI
@@ -2644,8 +2644,8 @@ async function _syncFinishedMatches(finishedKeys) {
       // ── KEY FIX: Luôn rebuild tree + sync winner vào vòng tiếp ──
       // Kể cả khi không ở tab cây thi đấu — để _bkCurrentTree có winner mới
       // rồi _bkDoSyncToSchedule tạo/update CK/H3 trong _M và GAS
-      // v8: NHƯNG chỉ làm điều này khi cây thi đấu đang hoạt động (không bị xóa)
-      if (_bkGiai && _bkNd && !_bkIsEmpty) {
+      // v37: Sau Apply → chỉ resolve winners, không rebuild; Trước Apply → bỏ qua (user chưa set tree)
+      if (_bkGiai && _bkNd && !_bkIsEmpty && _bkApplied && _bkCurrentTree) {
         // Rebuild tree silently (không cần render vào UI nếu tab đang ẩn)
         const { seeds, bangs, bangDone } = _bkCalcSeeds(_bkGiai, _bkNd);
         const _gn2 = _resolveGiaiName(_bkGiai) || _bkGiai;
@@ -9481,14 +9481,14 @@ async function _bkLoadTreeFromSheet() {
     if (d.ok && d.tree && d.version) {
       if (d.version <= _bkLastVersion) return false; // không có gì mới
       _bkCurrentTree = d.tree;
-      // Restore overrides từ tree (chúng được embed trong tree khi save)
+      _bkApplied = true; // v37: Loaded từ GSheet → cây đã Apply, khóa lại
       if (d.tree._overrides) {
         _bkOverrides = d.tree._overrides;
         try { localStorage.setItem(_bkKey(), JSON.stringify(_bkOverrides)); } catch(ex){}
       }
       if (d.tree._byeRule) _bkByeRule = d.tree._byeRule;
       _bkLastVersion = d.version;
-      console.log('[BK TREE] Loaded from GSheet v', d.version, '— rounds:', _bkCurrentTree?.rounds?.length);
+      console.log('[BK TREE] Loaded from GSheet v', d.version, '— rounds:', _bkCurrentTree?.rounds?.length, '(LOCKED)');
       return true;
     }
     return false;
@@ -9654,19 +9654,30 @@ function bkRender() {
     if (status) status.innerHTML = '';
     return;
   }
-  const { seeds, bangs, bangDone } = _bkCalcSeeds(_bkGiai, _bkNd);
   const _giaiName = _resolveGiaiName(_bkGiai) || _bkGiai;
   const allM = _M.filter(m=>String(m[0]||'')===_giaiName&&String(m[1]||'')===_bkNd);
   const koMatches = allM.filter(m=>{
     const v=String(m[9]||''); return v&&v!=='Vòng bảng'&&!v.includes('bảng');
   });
-  let tree = _bkBuildTree(seeds, bangs, koMatches, bangDone);
-  tree = _bkApplyOverrides(tree);
-  // Re-resolve winners cho vòng sau dựa trên tên đã được override + kết quả Sheet
-  tree = _bkResolveAdvancers(tree, koMatches);
 
-  // v37 FIX: Set _bkCurrentTree ngay sau khi build — không phụ thuộc vào UI elements
-  // Trước đây chỉ set trong _bkUpdateSeedPanel → nếu bk-seed-panel không tồn tại thì null mãi
+  let tree;
+  // v37: Nếu đã Áp dụng (_bkApplied=true) và có sẵn tree đã lưu → KHÔNG rebuild từ seeds
+  // Chỉ update teamA/teamB từ KQ thực tế — giữ nguyên cấu trúc cây đã chỉnh sửa
+  if (_bkApplied && _bkCurrentTree) {
+    // Clone tree để tránh mutation
+    tree = JSON.parse(JSON.stringify(_bkCurrentTree));
+    // Chỉ resolve advancers (điền winner từ KQ) — không rebuild từ seeding
+    tree = _bkApplyOverrides(tree);
+    tree = _bkResolveAdvancers(tree, koMatches);
+  } else {
+    // Chưa Apply: rebuild bình thường từ seeds (chế độ preview/chỉnh sửa)
+    const { seeds, bangs, bangDone } = _bkCalcSeeds(_bkGiai, _bkNd);
+    tree = _bkBuildTree(seeds, bangs, koMatches, bangDone);
+    tree = _bkApplyOverrides(tree);
+    tree = _bkResolveAdvancers(tree, koMatches);
+  }
+
+  // v37: Set _bkCurrentTree sau build/resolve
   _bkCurrentTree = tree;
 
   // bangDone is now computed in _bkCalcSeeds
@@ -10076,9 +10087,10 @@ async function ndBkGenChart() {
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Đang tạo...'; }
 
   try {
-    _bkDeletedAt = 0;      // v7: user chủ động tạo → cho phép render trở lại
-    _bkSetEmpty(false);  // v7: xóa empty flag khỏi sessionStorage
-    // v8: Reset done-keys tracking để auto-advance có thể re-detect các bảng đã xong
+    _bkDeletedAt = 0;
+    _bkSetEmpty(false);
+    _bkApplied = false; // v37: Cây mới tạo — chưa Apply, cho phép preview/chỉnh sửa tự do
+    _bkCurrentTree = null; // Force rebuild từ seeds cho cây mới
     _bkLastKoDoneKeys = new Set();
     // Tính seeding từ BXH hiện tại
     const { seeds, bangs, bangDone } = _bkCalcSeeds(_bkGiai, _bkNd);
@@ -10128,9 +10140,9 @@ async function ndBkApplyFull() {
       _bkSetEmpty(false);
       _bkLastKoDoneKeys = new Set();
       _bkAutoMode = true;
+      _bkApplied  = true; // v37: Cây đã Apply — khóa, không rebuild từ seeds nữa
       _bkStartAutoPolling();
       _bkStartSyncPoll();
-      // v37: Lưu toàn bộ cây lên GSheet — tất cả PC và player sẽ tự tải về
       await _bkSaveTreeToSheet();
       toast('🤖 Đã tạo lịch · Cây đã đồng bộ GSheet · Tự động điền BẬT', 'ok', 3000);
     }
@@ -10365,35 +10377,29 @@ async function _bkAutoAdvanceIfNeeded() {
     } else {
       toast('🤖 Có kết quả mới — tự động điền vòng tiếp...', 'in');
     }
-    // Rebuild tree với winner mới
-    const { seeds: _s5, bangs: _b5, bangDone: _bd5 } = _bkCalcSeeds(_bkGiai, _bkNd);
+    // v37: Sau Apply — KHÔNG rebuild từ seeds, chỉ resolve advancers trên tree đã lưu
     const _gn5 = _resolveGiaiName(_bkGiai) || _bkGiai;
     const _allM5 = _M.filter(m => String(m[0]||'')===_gn5 && String(m[1]||'')===_bkNd);
     const _koM5  = _allM5.filter(m => { const v=String(m[9]||''); return v&&v!=='Vòng bảng'&&!v.includes('bảng'); });
-    let _tree5 = _bkBuildTree(_s5, _b5, _koM5, _bd5);
-    _tree5 = _bkApplyOverrides(_tree5);
-    _tree5 = _bkResolveAdvancers(_tree5, _koM5);
-    _bkCurrentTree = _tree5;
-    // Sync winner vào _M + GAS ngay (immediate, không debounce)
+    if (_bkCurrentTree) {
+      // Clone + resolve winners vào tree đã lưu — giữ nguyên vị trí, BYE, overrides
+      let _tree5 = JSON.parse(JSON.stringify(_bkCurrentTree));
+      _tree5 = _bkApplyOverrides(_tree5);
+      _tree5 = _bkResolveAdvancers(_tree5, _koM5);
+      _bkCurrentTree = _tree5;
+    }
+    // Sync winner vào Matches GAS
     await _bkDoSyncToSchedule();
-    await bkAutoFill();
-    // Sau khi autoFill: re-render bảng đấu nếu đang ở tab bảng đấu
+    // Lưu tree đã update lên GSheet để đồng bộ
+    if (_bkTreeSaveTimer) clearTimeout(_bkTreeSaveTimer);
+    _bkTreeSaveTimer = setTimeout(() => _bkSaveTreeToSheet(), 1500);
+    // Re-render bảng đấu
     if (_curGiaiId === _bkGiai && _curNd === _bkNd) {
       const tvNd = document.getElementById('tv-nd');
       if (tvNd && tvNd.style.display !== 'none') renderBangList(_bkGiai, _bkNd);
     }
-    // Re-render cây nếu đang ở tab cây thi đấu
-    const ndWrap = document.getElementById('nd-bk-wrap');
-    if (ndWrap && ndWrap.offsetParent !== null) {
-      _bkCurrentTree = null;
-      const realWrap = document.getElementById('bk-wrap');
-      if (realWrap) realWrap.id = '_bk_swap_hidden';
-      ndWrap.id = 'bk-wrap';
-      try { bkRender(); } finally {
-        ndWrap.id = 'nd-bk-wrap';
-        if (realWrap) realWrap.id = 'bk-wrap';
-      }
-    }
+    // Re-render cây
+    await _swapBkWrap('nd-bk-wrap', () => Promise.resolve(bkRender()));
 
   } catch(e) {
     console.warn('[bkAutoAdvance]', e.message);
@@ -10402,9 +10408,14 @@ async function _bkAutoAdvanceIfNeeded() {
 
 async function bkAutoFill() {
   if (!_bkGiai || !_bkNd) { toast('Chọn giải và nội dung trước', 'er'); return; }
-  // v8: Không tự động điền khi cây đã bị xóa — chờ admin nhấn "Tạo cây" trước
   if (_bkIsEmpty) {
-    console.log('[bkAutoFill] Blocked — tree is empty (deleted). Admin must click Tạo cây first.');
+    console.log('[bkAutoFill] Blocked — tree is empty (deleted).');
+    return;
+  }
+  // v37: Sau Apply, KHÔNG dùng bkAutoFill (sẽ rebuild seeds và ghi đè overrides)
+  // _bkResolveAdvancers trong bkRender() sẽ tự điền winner từ KQ rồi
+  if (_bkApplied) {
+    console.log('[bkAutoFill] Blocked — tree is locked after Apply. Winners auto-resolve via bkRender.');
     return;
   }
   const { seeds, bangs, bangDone } = _bkCalcSeeds(_bkGiai, _bkNd);
@@ -11542,6 +11553,7 @@ function bkClearOverride(code) {
 // Biến lưu tree hiện tại để dùng cho Apply
 let _bkCurrentTree = null;
 let _bkAutoMode = false;  // true = tự động điền khi có KQ, false = thủ công
+let _bkApplied  = false;  // v37: true = đã Áp dụng, cây bị khóa — chỉ update team khi có KQ
 let _bkEditMode = false;  // true = đang chỉnh sửa thủ công, tạm dừng auto
 let _bkAutoModeBeforeEdit = false; // lưu trạng thái auto trước khi edit
 
@@ -12621,11 +12633,11 @@ async function bkDeleteTree() {
     if (d?.ok) {
       // 1. Dừng auto-polling NGAY — tránh timer 8s reload _M và rebuild cây
       _bkAutoMode = false;
+      _bkApplied  = false; // v37: Reset — cho phép rebuild từ seeds khi Tạo cây mới
       _bkStopAutoPolling();
       _bkStopSyncPoll();
-      _bkDeletedAt = Date.now(); // v7: flag block mọi auto-render trong 5s
-      _bkSetEmpty(true);  // v7: persist qua reload — bkRender hiện trống thay vì rebuild từ seeding
-      // v8: Xóa done-keys tracking để auto-advance không dùng data cũ sau khi tạo lại cây
+      _bkDeletedAt = Date.now();
+      _bkSetEmpty(true);
       _bkLastKoDoneKeys = new Set();
 
       // 2. Xóa cache tree + overrides trong memory
