@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<!-- Pickleball v69 2026-06-04: FIX confirm() trong bkApplyAndSave bị browser block → return sớm không save BracketTree; thay bằng toast cảnh báo tiếp tục luôn | v68 2026-06-04: FIX saveBracketTree bị bỏ qua khi Apply lần 2 (toCreate=0, toUpdate=0 → return sớm trước khi save GSheet) | v67 2026-06-03: v6 FIX NGUỒN DUY NHẤT — buildDkFromResults/isMatchDone/getFinalScore/_syncResultCache/_buildLiveFromRows đều dùng key 4 trường "TênGiải|NộiDung|Bảng|MãTrận"; bỏ fallback Matches col[5/6] trong getFinalScore; bỏ giaiId duplicate trong _dK; bỏ fallback giaiId trong isMatchDone — badge Hoàn thành/Chưa đấu/Đang đấu giờ chính xác 100% từ KetQua | v66 2026-06-03: FIX v32 referee bugs — assignCourtToRef/assignRef/atrAssignDirect không xóa noidung cũ; _matchAllowed normalize dấu; renderMatchGrid hiển thị khi có trận phân tên | v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
+<!-- Pickleball v70 2026-06-04: FIX bkDeleteTree dùng double-tap thay confirm() bị browser block; GAS v37 fix giaiName undefined trong deleteBracketTree | v69 2026-06-04: FIX confirm() trong bkApplyAndSave bị browser block → return sớm không save BracketTree; thay bằng toast cảnh báo tiếp tục luôn | v68 2026-06-04: FIX saveBracketTree bị bỏ qua khi Apply lần 2 (toCreate=0, toUpdate=0 → return sớm trước khi save GSheet) | v67 2026-06-03: v6 FIX NGUỒN DUY NHẤT — buildDkFromResults/isMatchDone/getFinalScore/_syncResultCache/_buildLiveFromRows đều dùng key 4 trường "TênGiải|NộiDung|Bảng|MãTrận"; bỏ fallback Matches col[5/6] trong getFinalScore; bỏ giaiId duplicate trong _dK; bỏ fallback giaiId trong isMatchDone — badge Hoàn thành/Chưa đấu/Đang đấu giờ chính xác 100% từ KetQua | v66 2026-06-03: FIX v32 referee bugs — assignCourtToRef/assignRef/atrAssignDirect không xóa noidung cũ; _matchAllowed normalize dấu; renderMatchGrid hiển thị khi có trận phân tên | v65 2026-06-01: FIX bracket overflow + nút tràn màn hình PC | v25 | FIX: Login detailed errors, Test GAS button, Seeding cross-group verified | 2026-05-23 | Fix: s-done không nhảy loạn, _gasLastDone source-of-truth, stale localStorage invalidated | 2026-05-22 | v44 FIX: Cross-seeding cùng bảng + BYE trao đúng thành tích tốt nhất (nb=3,5,6,7) 2026-05-25 | v47 FIX: Phân công TT lỗi "Không xác định giải đấu"; Bracket full height; Toolbar nút đồng màu xanh dương, Thủ công/Tự động sáng xanh lá khi active | v49 FIX 2026-05-28: (1) Players persist localStorage — không mất khi navigate; (2) GAS dedup tính noidung | v54 2026-05-28: (3) Mỗi nội dung có danh sách VĐV độc lập (localStorage namespace by GS URL); (4) Nút Lưu danh sách / Sửa danh sách; (5) Chế độ read-only khi đã lưu | v51: Popup bốc thăm 5s + quản lý bảng | v52: Quy tắc cố định 4 đội/bảng | v53: Lưu DanhSachVDV+DanhSachBang lên GSheets | v54: skeleton loading cards, nút xóa nội dung, pre-cache, TTL 5 phút | v61 2026-06-01: (A) Nút ✏️ Sửa từng đội trong danh sách VĐV — đổi tên đồng bộ sang _bocThamGroups + Matches (GSheets renameTeamInMatches); (B) Badge bảng A/B/... hiển thị ngay trong danh sách VĐV; (C) GAS v28: action renameTeamInMatches cập nhật Matches+DanhSachVDV+DanhSachBang -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Admin v8.212 — Referee Pickleball / DA NANG ®</title>
@@ -12814,13 +12814,17 @@ async function bkDeleteTree() {
 
   if (!koMatches.length) { toast('Cây thi đấu đang trống, không có gì để xóa', 'in'); return; }
 
-  const confirmed = confirm(
-    '🗑 Xóa cây thi đấu?\n\n' +
-    'Sẽ xóa ' + koMatches.length + ' trận KO.\n' +
-    '⚠️ Xóa cả kết quả KO và vị trí đội trong cây.\n\n' +
-    'Hành động này không thể hoàn tác!'
-  );
-  if (!confirmed) return;
+  // FIX: Không dùng confirm() — bị browser block → return sớm, không xóa
+  // Thay bằng custom toast confirm với timeout 5s
+  const _delKey = 'pb_bk_del_confirm_' + _bkGiai + _bkNd;
+  const _alreadyConfirmed = sessionStorage.getItem(_delKey) === '1';
+  if (!_alreadyConfirmed) {
+    sessionStorage.setItem(_delKey, '1');
+    setTimeout(() => { try { sessionStorage.removeItem(_delKey); } catch(e){} }, 6000);
+    toast('⚠️ Nhấn 🗑 Xóa cây lần nữa để xác nhận xóa ' + koMatches.length + ' trận KO (không hoàn tác được)', 'er', 5000);
+    return;
+  }
+  sessionStorage.removeItem(_delKey);
 
   // Tìm nút để disable (cả 2 vị trí: nd-view và page-bracket)
   const btn = document.querySelector('[onclick*="bkDeleteTree"],[onclick*="ndBkDelete"]');
