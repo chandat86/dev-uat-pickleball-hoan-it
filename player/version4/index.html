@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>Pickleball v3.27— Xem Giải Đấu</title>
+<title>Pickleball v3.28— Xem Giải Đấu</title>
 <style>
 /* system font - no import needed */
 :root{
@@ -416,6 +416,43 @@ const GAS_URL = 'https://script.google.com/macros/s/AKfycbwbvIU-ASx6rFPOKJysMxBi
 let GS=GAS_URL, USER_NAME='', USER_CODE='', USER_GIAI='', USER_ND='';
 let _M=[], _R=[], _L=[], _T=null, _giaiName='';
 let _curTab='live', _curNd='', _allNds=[];
+
+// FIX v3.3: Lưu trạng thái UI để không bị reset khi silentRefresh
+const _uiState = {
+  // Collapse state của từng bảng đấu: { "BangA": true/false, ... }
+  collapsedBangs: new Set(),
+  // Scroll position của từng tab
+  scrollPos: {},
+};
+
+// Lưu scroll position của tab hiện tại
+function _saveScrollPos(){
+  try{ _uiState.scrollPos[_curTab] = window.scrollY||0; }catch(e){}
+}
+// Khôi phục scroll position
+function _restoreScrollPos(){
+  try{
+    const y = _uiState.scrollPos[_curTab]||0;
+    if(y>0) setTimeout(()=>window.scrollTo(0,y),50);
+  }catch(e){}
+}
+
+// Lưu trạng thái tab + nd vào sessionStorage
+function _saveUiToSession(){
+  try{
+    sessionStorage.setItem('pb_ui_tab',_curTab);
+    sessionStorage.setItem('pb_ui_nd',_curNd);
+  }catch(e){}
+}
+// Khôi phục tab + nd từ sessionStorage
+function _restoreUiFromSession(){
+  try{
+    const t=sessionStorage.getItem('pb_ui_tab');
+    const n=sessionStorage.getItem('pb_ui_nd');
+    if(t&&['live','schedule','standings','bracket'].includes(t)) _curTab=t;
+    if(n) _curNd=n;
+  }catch(e){}
+}
 let _liveTimer=null;
 // v37: BracketTree GSheet cache
 let _bkTreeCache={};     // {nd: {rounds, _overrides, _byeRule, version}}
@@ -522,7 +559,16 @@ async function startApp(){
   // Reset toàn bộ state cũ
   _M=[];_R=[];_L=[];_T=null;_giaiName='';_curNd='';_allNds=[];
   try{await loadAll();}catch(e){console.error('loadAll:',e);}
-  switchTab('live');
+  // FIX v3.3: Khôi phục tab + nd từ session (giữ vị trí khi reload/refresh)
+  _restoreUiFromSession();
+  // Validate nd sau khi loadAll (nd có thể không còn hợp lệ)
+  if(_curNd&&!_allNds.includes(_curNd)) _curNd=_allNds[0]||'';
+  // Apply tab đã khôi phục
+  document.querySelectorAll('.ntab').forEach(b=>b.classList.toggle('on',b.dataset.tab===_curTab));
+  document.querySelectorAll('.page').forEach(p=>p.classList.toggle('on',p.id==='tab-'+_curTab));
+  renderNdFilter();
+  renderCurrentTab();
+  _restoreScrollPos();
   startRefresh();
 }
 function startRefresh(){
@@ -560,21 +606,23 @@ async function _hardReload(){
 
 async function silentRefresh(){
   try{
+    _saveScrollPos(); // lưu scroll trước khi refresh
     await loadAll();
-    // FIX v3.3: KHÔNG gọi renderCurrentTab() toàn bộ để tránh nháy màn hình
-    // Chỉ re-render tab đang xem với update in-place (không xóa innerHTML)
+    // FIX v3.3: Update in-place — không xóa innerHTML, không nháy màn hình
     if(_curTab==='bracket'){
-      // Bracket: chỉ update data bên trong bk-inner nếu đã có, KHÔNG xóa toàn bộ
       const inner=$('bk-inner');
       if(inner&&_curNd&&_bkTreeCache[_curNd]){
-        // Re-render in-place — không hiện "Đang tải..."
         _bkRenderFromSnapshot(_curNd,_bkTreeCache[_curNd],inner);
       } else {
-        renderBracketTab(); // fallback: chưa có cache → load bình thường
+        renderBracketTab();
       }
+    } else if(_curTab==='schedule'){
+      // Schedule: re-render nhưng giữ collapse state (đã xử lý trong renderSchedule)
+      renderSchedule();
     } else {
-      renderCurrentTab(); // các tab khác render bình thường
+      renderCurrentTab();
     }
+    _restoreScrollPos(); // khôi phục scroll sau khi render
   }catch(e){}
 }
 
@@ -605,7 +653,13 @@ async function checkPermission(){
 }
 async function refreshAll(){
   const btn=$('rf-btn');btn.disabled=true;btn.textContent='⏳';
-  try{await loadAll();renderCurrentTab();toast('✅ Đã cập nhật');}
+  try{
+    _saveScrollPos();
+    await loadAll();
+    renderCurrentTab();
+    _restoreScrollPos();
+    toast('✅ Đã cập nhật');
+  }
   finally{btn.disabled=false;btn.textContent='↻ Làm mới';}
 }
 
@@ -684,7 +738,7 @@ function renderNdFilter(){
   bar.style.display='flex';
   bar.innerHTML=_allNds.map(nd=>`<button class="nd-chip${nd===_curNd?' on':''}" onclick="selectNd('${esc(nd)}')">${esc(nd)}</button>`).join('');
 }
-function selectNd(nd){_curNd=nd;renderNdFilter();renderCurrentTab();}
+function selectNd(nd){_curNd=nd;renderNdFilter();renderCurrentTab();_saveUiToSession();}
 
 function showDebug(){
   const el=$('debug-info');if(!el)return;
@@ -698,11 +752,14 @@ function showDebug(){
 
 // ══ TAB ══
 function switchTab(tab){
+  _saveScrollPos(); // lưu scroll tab cũ
   _curTab=tab;
   document.querySelectorAll('.ntab').forEach(b=>b.classList.toggle('on',b.dataset.tab===tab));
   document.querySelectorAll('.page').forEach(p=>p.classList.toggle('on',p.id==='tab-'+tab));
   renderNdFilter();
   renderCurrentTab();
+  _saveUiToSession(); // lưu tab mới vào session
+  _restoreScrollPos(); // khôi phục scroll tab mới
 }
 function renderCurrentTab(){
   try{
@@ -908,13 +965,15 @@ function renderSchedule(){
         <div class="mr-team right${bW?' winner':''}">${esc(tB)}</div>
       </div>`;
     }).join('');
+    // FIX v3.3: Giữ nguyên trạng thái collapse của bảng khi refresh
+    const isCollapsed=_uiState.collapsedBangs.has(bang.trim().replace(/^🏆\s*/,''));
     return `<div class="bang-card">
       <div class="bang-head" onclick="toggleBang(this)">
         <div class="bang-head-title">${isKo(bang)?'🏆 ':''} ${esc(bang)}</div>
         <div class="bang-head-meta">${meta}</div>
-        <div class="bang-chevron open">▾</div>
+        <div class="bang-chevron${isCollapsed?'':' open'}">▾</div>
       </div>
-      <div class="bang-body open">${rows}</div>
+      <div class="bang-body${isCollapsed?'':' open'}">${rows}</div>
     </div>`;
   }).join('');
 }
@@ -924,6 +983,13 @@ function toggleBang(head){
   const chev=head.querySelector('.bang-chevron');
   const open=body.classList.toggle('open');
   if(chev)chev.classList.toggle('open',open);
+  // FIX v3.3: Lưu trạng thái collapse để giữ nguyên khi refresh
+  const title=head.querySelector('.bang-head-title');
+  const bangName=title?title.textContent.trim().replace(/^🏆\s*/,''):'';
+  if(bangName){
+    if(open) _uiState.collapsedBangs.delete(bangName);
+    else _uiState.collapsedBangs.add(bangName);
+  }
 }
 
 // ══ RENDER BXH ══
