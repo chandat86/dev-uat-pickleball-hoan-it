@@ -3,7 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
-<title>Pickleball v6— Xem Giải Đấu</title>
+<!-- Luôn fetch HTML mới — tránh browser cache file cũ -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>Pickleball v3111 — Xem Giải Đấu</title>
 <style>
 /* system font - no import needed */
 :root{
@@ -501,7 +505,7 @@ let _permTimer=null;
 let _hardReloadTimer=null; // v3: Hard reload toàn bộ cache mỗi N phút
 const REFRESH_SEC=8;          // Cập nhật live/kết quả mỗi 8s
 const PERM_CHECK_SEC=20;      // Kiểm tra phân quyền mỗi 20s
-const HARD_RELOAD_MIN=30;     // FIX v3.3: Tăng lên 30 phút — 3 phút gây full reload nháy màn hình
+const HARD_RELOAD_MIN=5;      // Reload toàn bộ data mỗi 5 phút (phát hiện giải/bảng mới)
 const INACTIVITY_MIN=240;     // Tự động đăng xuất sau 4 giờ không hoạt động (240 phút)
 const _LAST_ACTIVE_KEY='pb_player_last_active';
 
@@ -522,6 +526,7 @@ function _isSessionExpired(){
   document.addEventListener(ev, _touchActive, {passive:true});
 });
 const DATA_VER_KEY='pb_pdata_ver'; // v3: version key để detect admin change
+const APP_VER_KEY ='pb_app_ver';   // version token từ GAS — detect cấu trúc giải thay đổi
 
 // ══ UTILS ══
 const $=id=>document.getElementById(id);
@@ -549,7 +554,9 @@ async function gGet(params,timeout=12000){
   try{
     const r=await fetch(url.toString(),{signal:ctrl.signal,cache:'no-store'});
     clearTimeout(t);
-    return await r.json();
+    const d=await r.json();
+    _checkAppVersion(d); // detect GAS version change → tự reload data
+    return d;
   }catch(e){clearTimeout(t);return {};}
 }
 
@@ -560,16 +567,14 @@ function loadSaved(){
     if(!s)return false;
     const j=JSON.parse(s);
     if(!j.u||!j.c)return false;
-    // FIX v3.29: Kiểm tra session expired (không hoạt động > INACTIVITY_MIN phút)
-    // → xóa cache, hiện màn hình đăng nhập, không auto-login
     if(_isSessionExpired()){
       localStorage.removeItem('pb_player_v6');
       localStorage.removeItem(_LAST_ACTIVE_KEY);
-      console.log('[AUTH] Session expired — require re-login');
-      return false; // hiện màn hình đăng nhập
+      return false;
     }
-    GS=j.u;USER_CODE=j.c;
-    USER_NAME='';USER_GIAI='';USER_ND='';
+    GS=j.u; USER_CODE=j.c;
+    // KHÔNG lấy USER_GIAI/USER_ND từ cache — luôn lấy từ GAS khi validate
+    USER_NAME=''; USER_GIAI=''; USER_ND='';
     return true;
   }catch(e){return false;}
 }
@@ -582,28 +587,48 @@ async function doLogin(){
   try{
     const phone=id.replace(/\D/g,'');
     const isPhone=phone.length>=8&&phone.length<=12&&/^\d+$/.test(phone);
-    const param=isPhone?'&phone='+encodeURIComponent(phone):'&code='+encodeURIComponent(id.toUpperCase());
-    const r=await fetch(GS+'?action=validate&device=player-web&_t='+Date.now()+param,{cache:'no-store'});
-    if(!r.ok){showErr('Lỗi kết nối HTTP '+r.status);btn.disabled=false;btn.textContent='Đăng nhập →';return;}
-    const d=await r.json();
-    console.log('[LOGIN] GAS response:', JSON.stringify(d));
+    const param=isPhone?`&phone=${encodeURIComponent(phone)}`:`&code=${encodeURIComponent(id.toUpperCase())}`;
+
+    // Thử playerInit trước (GAS mới) — nếu không có thì fallback validate (GAS cũ)
+    let d=null;
+    let usePlayerInit=false;
+    try{
+      const r1=await fetch(`${GS}?action=playerInit&device=player-web&_t=${Date.now()}${param}`,{cache:'no-store'});
+      if(r1.ok){
+        const j=await r1.json();
+        // playerInit hợp lệ nếu trả valid hoặc reason rõ ràng (không phải "unknown action")
+        if(j.valid!==undefined && j.reason!=='unknown_action'){
+          d=j; usePlayerInit=true;
+        }
+      }
+    }catch(e1){}
+
+    // Fallback: GAS cũ dùng validate
+    if(!d){
+      const r2=await fetch(`${GS}?action=validate&device=player-web&_t=${Date.now()}${param}`,{cache:'no-store'});
+      if(!r2.ok){showErr('Lỗi kết nối HTTP '+r2.status);btn.disabled=false;btn.textContent='Đăng nhập →';return;}
+      d=await r2.json();
+    }
+
     if(!d.valid){showErr(d.reason||'Số điện thoại hoặc mã không đúng');btn.disabled=false;btn.textContent='Đăng nhập →';return;}
     const st=(d.statusRaw||'').toLowerCase();
     if(st==='khóa'||st==='disabled'){showErr('Tài khoản bị khóa');btn.disabled=false;btn.textContent='Đăng nhập →';return;}
+    if(d.noGiai||!d.giai?.trim()){showErr('⚠️ Tài khoản chưa được phân giải đấu. Vui lòng liên hệ admin.');btn.disabled=false;btn.textContent='Đăng nhập →';return;}
+
     USER_NAME=d.name||'';
     USER_CODE=d.code||'';
     USER_GIAI=d.giai||'';
     USER_ND=d.noidung||'';
-    console.log('[LOGIN] USER_GIAI:', USER_GIAI, '| USER_ND:', USER_ND);
-    // Nếu chưa được cấp quyền xem giải nào → báo rõ
-    if(!USER_GIAI.trim()){
-      showErr('⚠️ Tài khoản chưa được cấp quyền xem giải đấu. Vui lòng liên hệ admin.');
-      btn.disabled=false;btn.textContent='Đăng nhập →';return;
-    }
     localStorage.setItem('pb_player_v6',JSON.stringify({u:GS,c:USER_CODE,n:USER_NAME,g:USER_GIAI,nd:USER_ND}));
-    // v3: Clear mọi cache dữ liệu khi đăng nhập mới — đảm bảo không dùng data cũ
-    _clearDataCache();
-    startApp();
+
+    if(usePlayerInit && d.matches){
+      _applyPlayerInitData(d); // GAS mới: data có sẵn trong response
+      startApp(true);
+    } else {
+      // GAS cũ: gọi loadAll bình thường
+      _clearDataCache();
+      startApp(false);
+    }
   }catch(e){showErr('Lỗi: '+e.message);btn.disabled=false;btn.textContent='Đăng nhập →';}
 }
 function showErr(m){const e=$('login-err');e.textContent=m;e.style.display='block';}
@@ -621,12 +646,15 @@ function doLogout(){
 }
 
 // ══ APP ══
-async function startApp(){
+async function startApp(dataAlreadyLoaded){
   $('login-screen').style.display='none';
   $('app').style.display='block';
-  _touchActive(); // FIX v3.29: Ghi nhận thời điểm login/start
-  _M=[];_R=[];_L=[];_T=null;_giaiName='';_curNd='';_allNds=[];
-  try{await loadAll();}catch(e){console.error('loadAll:',e);}
+  _touchActive();
+  // Nếu data chưa có (login mới qua doLogin) → gọi playerInit lại
+  if(!dataAlreadyLoaded){
+    _M=[];_R=[];_L=[];_T=null;_giaiName='';_curNd='';_allNds=[];
+    try{await loadAll();}catch(e){console.error('loadAll:',e);}
+  }
   _restoreUiFromSession();
   if(_curNd&&!_allNds.includes(_curNd)) _curNd=_allNds[0]||'';
   document.querySelectorAll('.ntab').forEach(b=>b.classList.toggle('on',b.dataset.tab===_curTab));
@@ -660,10 +688,38 @@ function _clearDataCache(){
   console.log('[v3] Data cache cleared (incl bracket snapshot)');
 }
 
+// ── App version check: GAS trả appVersion trong mọi response ──
+// Nếu version thay đổi (admin deploy GAS mới) → clear data cache + reload
+let _appVerChecked = false;
+function _checkAppVersion(data) {
+  if (!data?.appVersion) return;
+  try {
+    const saved = localStorage.getItem(APP_VER_KEY);
+    if (!saved) {
+      // Lần đầu — lưu lại, không reload
+      localStorage.setItem(APP_VER_KEY, data.appVersion);
+      return;
+    }
+    if (saved !== data.appVersion) {
+      console.log('[ver] App version changed:', saved, '→', data.appVersion);
+      localStorage.setItem(APP_VER_KEY, data.appVersion);
+      if (!_appVerChecked) {
+        _appVerChecked = true; // tránh reload loop
+        _clearDataCache();
+        loadAll().then(() => {
+          renderCurrentTab();
+          console.log('[ver] Reloaded data after version change');
+        }).catch(e => console.warn('[ver] Reload error:', e));
+      }
+    }
+  } catch(e) {}
+}
+
 // v3: Hard reload định kỳ — fetch lại toàn bộ từ server, cập nhật cây thi đấu & VĐV
 async function _hardReload(){
   if(!GS||!USER_CODE)return;
   console.log('[v3] Hard reload triggered');
+  _appVerChecked = false; // reset để sẵn sàng detect version change tiếp theo
   _clearDataCache();
   try{
     await loadAll();
@@ -701,19 +757,19 @@ async function silentRefresh(){
 async function checkPermission(){
   if(!GS||!USER_CODE)return;
   try{
-    const r=await fetch(GS+'?action=validate&device=player-web&_t='+Date.now()+'&code='+encodeURIComponent(USER_CODE),{cache:'no-store'});
+    // Dùng validate (luôn có) để kiểm tra phân quyền
+    const r=await fetch(`${GS}?action=validate&device=player-web&_t=${Date.now()}&code=${encodeURIComponent(USER_CODE)}`,{cache:'no-store'});
     if(!r.ok)return;
     const d=await r.json();
     if(!d.valid)return;
     const newGiai=(d.giai||'').trim();
     const newNd=(d.noidung||'').trim();
-    const oldGiai=(USER_GIAI||'').trim();
-    const oldNd=(USER_ND||'').trim();
-    // v3: Luôn cập nhật tên nếu thay đổi
-    if(d.name)USER_NAME=d.name;
-    // Nếu phân quyền thay đổi HOẶC lần đầu chưa có giải → clear cache + reload
-    if(newGiai!==oldGiai||newNd!==oldNd||!oldGiai){
-      USER_GIAI=newGiai;USER_ND=newNd;
+    if(d.name) USER_NAME=d.name;
+    // Chỉ reload khi phân quyền thực sự thay đổi
+    if(newGiai!==USER_GIAI||newNd!==USER_ND){
+      console.log('[checkPermission] Giải thay đổi:',USER_GIAI,'→',newGiai);
+      USER_GIAI=newGiai; USER_ND=newNd;
+      _giaiName=''; // reset để loadAll resolve lại từ tournaments
       localStorage.setItem('pb_player_v6',JSON.stringify({u:GS,c:USER_CODE,n:USER_NAME,g:USER_GIAI,nd:USER_ND}));
       _clearDataCache();
       await loadAll();
@@ -735,47 +791,35 @@ async function refreshAll(){
 }
 
 // ══ LOAD DATA ══
+// loadAll chỉ fetch data theo USER_GIAI hiện tại — không validate lại
+// Việc cập nhật USER_GIAI mới là của autoLoginFromCache() và checkPermission()
 async function loadAll(){
-  // Step 1: Resolve giai name from tournaments list
+  if(!GS||!USER_CODE)return;
+  const giaiToUse=_giaiName||USER_GIAI||'';
+  if(!giaiToUse){console.warn('[loadAll] Chưa có giải');return;}
   try{
-    const td=await gGet({action:'tournaments'});
-    if(td.rows?.length>1){
-      const trows=td.rows.slice(1);
-      const gUp=(USER_GIAI||'').trim().toUpperCase();
-      let found=null;
-      if(gUp){
-        // Tìm match chính xác trước
-        found=trows.find(r=>String(r[0]||'').trim().toUpperCase()===gUp||String(r[1]||'').trim().toUpperCase()===gUp);
-        // Nếu không match chính xác, thử contains (partial match)
-        if(!found)found=trows.find(r=>String(r[1]||'').trim().toUpperCase().includes(gUp)||gUp.includes(String(r[1]||'').trim().toUpperCase()));
-      }
-      if(found){_T=found;_giaiName=String(found[1]||'').trim();
-        console.log('[LOAD] Matched tournament:', _giaiName);}
-      else if(gUp){console.warn('[LOAD] No tournament match for USER_GIAI:', USER_GIAI,'| Available:', trows.map(r=>r[1]).join(' / '));}
-    }
-  }catch(e){console.warn('tournaments fetch:',e);}
-
-  // Step 2: Fetch with giai NAME (GAS filters by name not ID)
-  const gName=_giaiName||USER_GIAI||'';
-  try{
-    const[md,rd,ld]=await Promise.all([
-      gGet({action:'matches',giai:gName}).catch(()=>({})),
-      gGet({action:'results',giai:gName}).catch(()=>({})),
-      gGet({action:'live',code:'all',giai:gName}).catch(()=>({}) ),
+    const[td,md,rd,ld]=await Promise.all([
+      fetch(`${GS}?action=tournaments&_t=${Date.now()}`,{cache:'no-store'}).then(r=>r.json()).catch(()=>({})),
+      fetch(`${GS}?action=matches&giai=${encodeURIComponent(giaiToUse)}&_t=${Date.now()}`,{cache:'no-store'}).then(r=>r.json()).catch(()=>({})),
+      fetch(`${GS}?action=results&giai=${encodeURIComponent(giaiToUse)}&_t=${Date.now()}`,{cache:'no-store'}).then(r=>r.json()).catch(()=>({})),
+      fetch(`${GS}?action=live&code=all&giai=${encodeURIComponent(giaiToUse)}&_t=${Date.now()}`,{cache:'no-store'}).then(r=>r.json()).catch(()=>({})),
     ]);
-    if(md.rows?.length>1)_M=md.rows.slice(1);
-    if(rd.rows?.length>1)_R=rd.rows.slice(1);
-    // HDR_LIVE: [Key, Giải đấu, Đội A, Điểm A, Điểm B, Đội B, Giao bóng, Game, Cập nhật, Trạng thái]
+    if(td.rows?.length>1){
+      const gUp=giaiToUse.trim().toUpperCase();
+      const found=td.rows.slice(1).find(r=>
+        String(r[0]||'').trim().toUpperCase()===gUp||
+        String(r[1]||'').trim().toUpperCase()===gUp
+      );
+      if(found){_T=found;_giaiName=String(found[1]||'').trim();}
+    }
+    if(md.rows?.length>1)_M=md.rows.slice(1); else _M=[];
+    if(rd.rows?.length>1)_R=rd.rows.slice(1); else _R=[];
     if(ld.rows?.length>1)_L=ld.rows.slice(1).filter(r=>String(r[9]||'').toLowerCase()!=='finished');
     else _L=[];
-  }catch(e){console.warn('data fetch:',e);}
-
-  buildNdList();
-  renderTopBar();
-  renderNdFilter();
-  setUpdateTime();
-  $('tb-live').style.display=_L.length?'flex':'none';
-  showDebug();
+    buildNdList();renderTopBar();renderNdFilter();setUpdateTime();
+    const lb=$('tb-live');if(lb)lb.style.display=_L.length?'flex':'none';
+    console.log('[loadAll]',_giaiName,'M:',_M.length,'L:',_L.length);
+  }catch(e){console.warn('[loadAll]',e);}
 }
 
 function buildNdList(){
@@ -1047,17 +1091,18 @@ function renderSchedule(){
       const tA=String(m[4]||'').trim()||'TBD',tB=String(m[7]||'').trim()||'TBD';
       const court=String(m[8]||''),round=String(m[9]||'');
       const matchTimeRaw=String(m[11]||'').trim(); // giờ thi đấu col[11]
-      // Format: HH:MM hoặc ISO datetime từ GAS (UTC, lệch -7h so VN) → "8:15"
+      // Format: GAS trả về HH:MM string đúng (đã fix ở GAS v40)
+      // Fallback: nếu vẫn còn ISO (data cũ) → parse UTC rồi cộng +7h (UTC+7)
       const fmtMatchTime=(v)=>{
         if(!v)return'';
-        // ISO: "1899-12-30T01:08:30.000Z" → cộng 7h để về giờ VN (UTC+7)
+        // ISO còn sót: "1899-12-30T01:08:30.000Z" → +7h về VN
         const iso=v.match(/T(\d{2}):(\d{2})/);
         if(iso){
-          const totalMin=parseInt(iso[1],10)*60+parseInt(iso[2],10)+7*60; // +7h
-          const h=Math.floor(totalMin/60)%24, mi=totalMin%60;
+          const totalMin=parseInt(iso[1],10)*60+parseInt(iso[2],10)+420;
+          const h=Math.floor(totalMin/60)%24,mi=totalMin%60;
           return h+':'+String(mi).padStart(2,'0');
         }
-        // HH:MM bình thường → bỏ số 0 đầu giờ: "08:15" → "8:15"
+        // HH:MM bình thường → bỏ số 0 đầu: "08:15" → "8:15"
         const hm=v.match(/^(\d{1,2}):(\d{2})/);
         if(hm)return parseInt(hm[1],10)+':'+hm[2];
         return v;
@@ -1954,31 +1999,53 @@ function selectBkNd(nd){
 
 // ══ BOOT ══
 async function autoLoginFromCache(){
-  // Re-validate với server để lấy phân quyền mới nhất, không tin cache cũ
   try{
-    const r=await fetch(GS+'?action=validate&device=player-web&_t='+Date.now()+'&code='+encodeURIComponent(USER_CODE),{cache:'no-store'});
-    if(!r.ok)return false;
-    const d=await r.json();
+    // Thử playerInit (GAS mới) — fallback validate (GAS cũ)
+    let d=null, hasData=false;
+    try{
+      const r1=await fetch(`${GS}?action=playerInit&device=player-web&_t=${Date.now()}&code=${encodeURIComponent(USER_CODE)}`,{cache:'no-store'});
+      if(r1.ok){const j=await r1.json();if(j.valid!==undefined&&j.reason!=='unknown_action'){d=j;hasData=!!(j.matches);}}
+    }catch(e1){}
+    if(!d){
+      const r2=await fetch(`${GS}?action=validate&device=player-web&_t=${Date.now()}&code=${encodeURIComponent(USER_CODE)}`,{cache:'no-store'});
+      if(!r2.ok)return false;
+      d=await r2.json();
+    }
     if(!d.valid)return false;
     const st=(d.statusRaw||'').toLowerCase();
     if(st==='khóa'||st==='disabled')return false;
-    // Cập nhật phân quyền mới từ server (không dùng cache cũ)
-    USER_NAME=d.name||'';USER_CODE=d.code||'';
-    USER_GIAI=d.giai||'';
-    USER_ND=d.noidung||'';
-    console.log('[AUTO-LOGIN] USER_GIAI:', USER_GIAI);
-    if(!USER_GIAI.trim())return false; // Chưa có phân quyền → yêu cầu đăng nhập lại
+    USER_NAME=d.name||''; USER_CODE=d.code||USER_CODE;
+    USER_GIAI=d.giai||''; USER_ND=d.noidung||'';
+    if(!USER_GIAI.trim())return false;
     localStorage.setItem('pb_player_v6',JSON.stringify({u:GS,c:USER_CODE,n:USER_NAME,g:USER_GIAI,nd:USER_ND}));
-    // v3: Clear data cache sau khi re-validate để luôn fetch fresh
+    if(hasData){_applyPlayerInitData(d);return 'withData';}
     _clearDataCache();
     return true;
   }catch(e){return false;}
 }
+
+// Áp dụng data từ playerInit vào bộ nhớ
+function _applyPlayerInitData(d){
+  _clearDataCache();
+  if(d.tournaments?.rows?.length>1){const trows=d.tournaments.rows.slice(1);_T=trows[0]||null;_giaiName=_T?String(_T[1]||'').trim():'';}
+  if(d.matches?.rows?.length>1)_M=d.matches.rows.slice(1);
+  if(d.results?.rows?.length>1)_R=d.results.rows.slice(1);
+  if(d.live?.rows?.length>1)_L=d.live.rows.slice(1).filter(r=>String(r[9]||'').toLowerCase()!=='finished');
+  else _L=[];
+  buildNdList();renderTopBar();renderNdFilter();setUpdateTime();
+  const lb=$('tb-live');if(lb)lb.style.display=_L.length?'flex':'none';
+  console.log('[playerInit]',_giaiName,'M:',_M.length,'L:',_L.length);
+}
 window.addEventListener('load',async()=>{
   $('gs-url').value=GAS_URL;
+
+  // ── Xóa data cache mỗi lần load trang — chỉ giữ login session ──
+  // Đảm bảo không bao giờ hiện data cũ từ bộ nhớ RAM
+  _M=[];_R=[];_L=[];_T=null;_giaiName='';_curNd='';_allNds=[];
+  _bkTreeCache={};_bkTreeVersion=0;
+  try{sessionStorage.removeItem('pb_pdata_ver');}catch(e){}
+
   if(loadSaved()&&GS&&USER_CODE){
-    // FIX v3.30: Có session hợp lệ → hiện loading, không hiện login form
-    // Tránh login screen nháy trong khi đang validate với GAS
     $('login-screen').style.display='none';
     const loadingEl=document.createElement('div');
     loadingEl.id='boot-loading';
@@ -1988,7 +2055,7 @@ window.addEventListener('load',async()=>{
     const ok=await autoLoginFromCache();
     loadingEl.remove();
     if(ok){
-      startApp();
+      startApp(ok==='withData'); // withData=true → skip loadAll; true → cần loadAll
     }else{
       // validate thất bại hoặc chưa có phân quyền → xóa cache, hiện login
       localStorage.removeItem('pb_player_v6');
